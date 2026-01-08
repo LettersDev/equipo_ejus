@@ -1,0 +1,62 @@
+# === SISTEMA EQUIPO EJUS ===
+# Node/React
+node_modules/
+dist/
+build/
+.env
+*.local
+
+# Python/Django
+*.pyc
+__pycache__/
+venv/
+venv_bak_*/
+*.pyo
+*.pyd
+*.egg-info/
+staticfiles/
+media/
+
+# SQLite (NO IGNORAR db.sqlite3 para no borrar la base de datos de producción)
+# !backend_ejus/RegistroVisitas_Backend/db.sqlite3
+
+# VSCode/IDE
+.vscode/
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Instaladores y binarios
+installers/*.exe
+scripts/offline/python-installer.exe
+scripts/offline/nssm.exe
+scripts/offline/nssm-2.24/
+
+# Paquetes offline
+scripts/offline/wheels/
+
+# Otros
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Backup/archivos temporales
+*.bak
+*.tmp
+*.temp
+
+# No ignorar la base de datos de producción
+!backend_ejus/RegistroVisitas_Backend/db.sqlite3
+
+# Electron-builder output
+dist_electron/
+win-unpacked/
+*.asar

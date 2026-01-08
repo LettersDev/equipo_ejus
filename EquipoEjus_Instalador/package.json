@@ -1,0 +1,44 @@
+{
+  "name": "equipoejus-instalador",
+  "version": "1.0.0",
+  "description": "Aplicacion de Registro de Visitas Ejus",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "author": "Luis Rodriguez",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "com.ejus.registro",
+    "productName": "RegistroVisitasEjus",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "dir"
+      ]
+    },
+    "asar": true,
+    "asarUnpack": [
+      "**/db.sqlite3"
+    ],
+    "extraResources": [
+      {
+        "from": "backend_ejus/RegistroVisitas_Backend/dist/django_backend.exe",
+        "to": "./django_backend.exe"
+      },
+      {
+        "from": "backend_ejus/RegistroVisitas_Backend/db.sqlite3",
+        "to": "./db.sqlite3"
+      }
+    ]
+  }
+
+}
