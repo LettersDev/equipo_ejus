@@ -65,9 +65,19 @@ const VisitanteForm = memo(({
           ['IMPUGNACION_DE_PATERNIDAD', 'Impugnación de Paternidad'],
           ['PERMISOS_DE_VIAJE', 'Permisos de Viajes'],
           ['TITULO_SUPLITORIO', 'Título Supletorio'],
+          ['EJERCICIO_UNILATERAL_PATRIA_POTESTAD', 'Ejercicio Unilateral de la Patria Potestad'],
+          ['COLOCACION_FAMILIAR', 'Colocación Familiar'],
+          ['CAMBIO_DE_RESIDENCIA_INTERNACIONAL', 'Cambio de Residencia Internacional'],
+          ['UNION_ESTABLE_POST_MORTEN', 'Unión Estable Post Mortem'],
+          ['CUSTODIA', 'Custodia'],
           ['OTRO', 'Otro']
         ]);
         setInstitucionOpciones([
+          ['PROTECCION', 'Protección'],
+          ['CIVIL', 'Civil'],
+          ['LABORAL', 'Laboral'],
+          ['PENAL', 'Penal'],
+          ['VIOLENCIA_DE_GENERO', 'Violencia de Género'],
           ['MINISTERIO_PUBLICO', 'Ministerio Público'],
           ['DEFENSORIA_DEL_PUEBLO', 'Defensoría del Pueblo'],
           ['PREFECTURA', 'Prefectura'],
