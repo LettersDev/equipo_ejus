@@ -185,31 +185,22 @@ const VisitanteForm = memo(({
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
     
-    // Validación básica
+    // 1. Validaciones básicas
     if (!formData.nombre || !formData.cedula || !formData.tipo_visita) {
       showToast('Por favor complete los campos obligatorios: Nombre, Cédula y Tipo de trámite', 'warning');
       return;
     }
 
-    // Validar cédula (entre 6 y 20 caracteres)
     if (formData.cedula.length < 6 || formData.cedula.length > 20) {
       showToast('La cédula debe tener entre 6 y 20 caracteres', 'warning');
       return;
     }
 
-    // Validar municipio seleccionado
-    if (!formData.municipio) {
-      showToast('Por favor seleccione un municipio', 'warning');
+    if (!formData.municipio || !formData.parroquia) {
+      showToast('Por favor seleccione municipio y parroquia', 'warning');
       return;
     }
 
-    // Validar parroquia seleccionada
-    if (!formData.parroquia) {
-      showToast('Por favor seleccione una parroquia', 'warning');
-      return;
-    }
-
-    // Validar si seleccionó OTRA_INSTITUCION pero no especificó cuál
     if (formData.referir_a === 'OTRA_INSTITUCION' && !formData.otra_institucion) {
       showToast('Si selecciona "Otra Institución", debe especificar cuál', 'warning');
       return;
@@ -225,26 +216,44 @@ const VisitanteForm = memo(({
         const municipioSeleccionado = municipiosLara.find(m => m.id === formData.municipio);
         const parroquiaSeleccionada = parroquias.find(p => p.id === formData.parroquia);
         
+        const municipioNombre = municipioSeleccionado?.nombre || formData.municipio;
+        const parroquiaNombre = parroquiaSeleccionada?.nombre || formData.parroquia;
+
         // Crear dirección completa
         const direccionCompleta = [
           formData.direccion,
-          parroquiaSeleccionada?.nombre,
-          municipioSeleccionado?.nombre,
+          parroquiaNombre,
+          municipioNombre,
           estadoLara.nombre
         ].filter(Boolean).join(', ');
         
-        // Preparar datos para enviar
+        // A. Preparar datos para tu base de datos principal (Django)
         const datosParaEnviar = {
           ...formData,
-          municipio: municipioSeleccionado?.nombre || formData.municipio,
-          parroquia: parroquiaSeleccionada?.nombre || formData.parroquia,
+          municipio: municipioNombre,
+          parroquia: parroquiaNombre,
           direccion: direccionCompleta
         };
         
+        // B. Preparar datos simplificados para Google Sheets (Mapa)
+        const datosParaMapa = {
+          municipio: municipioNombre,
+          parroquia: parroquiaNombre,
+          tipo_visita: formData.tipo_visita
+        };
+
+        // 1. Enviar a tu API principal
         await onSubmit(datosParaEnviar);
         
-        // IMPORTANTE: Resetear el formulario después de enviar exitosamente
-        // Solo si NO es edición (para nuevo registro)
+        // 2. Enviar a Google Sheets (sin esperar a que responda para no retrasar al usuario)
+        fetch("https://script.google.com/macros/s/AKfycbwH4QtRYbEIeeYvTJHNh8w4-LLNGY_hJy01FyzbrqVVDcuKU4mJJSe8d7s2UUNsYJCO/exec", {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(datosParaMapa)
+        }).catch(err => console.error("Error enviando al mapa:", err));
+
+        // Resetear si es nuevo registro
         if (!isEdit) {
           resetForm();
         }
@@ -257,7 +266,6 @@ const VisitanteForm = memo(({
       }
     }
   }, [formData, parroquias, onSubmit, externalIsSubmitting, isSubmitting, isEdit, resetForm]);
-
   const handleCancel = useCallback(() => {
     // Solo resetear si NO es edición (para nuevo registro)
     if (!isEdit) {

@@ -41,13 +41,14 @@ const ModalLogin = ({ isOpen = true, onClose, onSuccess, onOpenRegister }) => {
     <div className="auth-container">
       <div className="auth-card" role="dialog" aria-modal="true" aria-labelledby="login-title">
         {/* Columna izquierda con imagen */}
-        <div
-          className="auth-image-section"
-          style={{ backgroundImage: `url(${tsjLogo})` }}
-          aria-hidden="true"
-        >
-          <div className="auth-image-overlay" />
-        </div>
+        <div className="auth-image-section">
+    <img 
+        src={tsjLogo} 
+        alt="Logo TSJ" 
+        className="auth-bg-img" 
+    />
+    <div className="auth-image-overlay" />
+</div>
 
         {/* Columna derecha con formulario */}
         <div className="auth-form-section">
