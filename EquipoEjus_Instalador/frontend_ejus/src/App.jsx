@@ -213,7 +213,7 @@ function App() {
           <div className="footer-left">
             <span>Direccion Ejecutiva de la Magistratura</span>
             <span className="divider">|</span>
-            <span>Sistema de Control de Visitantes v1.0.3</span>
+            <span>Sistema de Control de Visitantes v1.0.5</span>
           </div>
           <div className="footer-right" style={{ gap: '1.2rem' }}>
             <span>{new Date().getFullYear()} © TSJ - Eleborado por: TSU. Luis Rodriguez</span>

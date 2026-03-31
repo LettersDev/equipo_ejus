@@ -31,6 +31,7 @@ media/
 *.sw?
 
 # Instaladores y binarios
+Instalador_Final/
 installers/*.exe
 scripts/offline/python-installer.exe
 scripts/offline/nssm.exe

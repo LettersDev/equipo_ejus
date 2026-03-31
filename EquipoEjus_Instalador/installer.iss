@@ -2,7 +2,7 @@
 ; --- Información básica de la aplicación ---
 AppId={{com.ejus.registro}}
 AppName=Registro de Visitas TSJ-DEM
-AppVersion=1.0.2
+AppVersion=1.0.5
 AppPublisher=Luis Rodriguez - TSJ
 AppComments=Aplicación de Registro de Visitas para el Equipo de Justicia Social
 
@@ -14,7 +14,7 @@ AllowNoIcons=yes
 
 ; --- Configuración del Instalador Final ---
 OutputDir=C:\Users\Luis Rodriguez\Desktop\EquipoEjus\Instalador_Final
-OutputBaseFilename=Instalador_Registro_Visitas_V1.0.3
+OutputBaseFilename=Instalador_Registro_Visitas_V1.0.5
 ; El escudo de EJUS para el instalador .exe
 SetupIconFile=C:\Users\Luis Rodriguez\Desktop\EquipoEjus\EquipoEjus_Instalador\build\icon.ico
 Compression=lzma
