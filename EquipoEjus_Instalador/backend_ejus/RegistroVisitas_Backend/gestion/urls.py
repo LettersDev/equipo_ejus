@@ -9,6 +9,7 @@ from rest_framework.response import Response
 
 router = DefaultRouter()
 router.register(r'visitantes', views.VisitanteViewSet, basename='visitante')
+router.register(r'audit/logs', views.AuditLogViewSet, basename='auditlog')
 
 urlpatterns = [
     # API CRUD de Visitantes
@@ -28,7 +29,6 @@ path('dashboard/estadisticas/', views.VisitanteViewSet.as_view({'get': 'estadist
     
     # Exportación de reportes
     path('reportes/exportar/pdf/', views.ExportarReportePDFView.as_view(), name='exportar-reporte-pdf'),
-    path('reportes/exportar/excel/', views.ExportarReporteExcelView.as_view(), name='exportar-reporte-excel'),
     
     # Rutas adicionales para funcionalidades específicas
     path('visitantes/<int:pk>/registrar-salida/', 

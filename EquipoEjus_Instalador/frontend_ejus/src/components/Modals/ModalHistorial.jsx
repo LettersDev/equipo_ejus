@@ -2,27 +2,44 @@ import React, { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
 import { tsjService } from '../../services/api';
 
+const historialInitialState = {
+  visitas: [],
+  loading: false,
+  error: null
+};
+
+function historialReducer(state, action) {
+  switch (action.type) {
+    case 'FETCH_START':
+      return { ...state, loading: true, error: null };
+    case 'FETCH_SUCCESS':
+      return { ...state, loading: false, visitas: action.payload };
+    case 'FETCH_ERROR':
+      return { ...state, loading: false, error: action.payload, visitas: [] };
+    default:
+      return state;
+  }
+}
+
 const ModalHistorial = ({ isOpen, onClose, cedula }) => {
-  const [visitas, setVisitas] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [state, dispatch] = React.useReducer(historialReducer, historialInitialState);
+  const { visitas, loading, error } = state;
 
   useEffect(() => {
     if (!isOpen || !cedula) return;
     let mounted = true;
     const fetchHistorial = async () => {
-      setLoading(true);
-      setError(null);
+      dispatch({ type: 'FETCH_START' });
       try {
-        // use search param with cedula to fetch matching visitas
         const params = { search: String(cedula), ordering: '-fecha_hora_ingreso', page_size: 200 };
         const resp = await tsjService.getVisitantes(params);
         const items = resp.data.results ? resp.data.results : resp.data;
-        if (mounted) setVisitas(items.filter(v => String(v.cedula).trim() === String(cedula).trim()));
+        if (mounted) {
+          const filtered = items.filter(v => String(v.cedula).trim() === String(cedula).trim());
+          dispatch({ type: 'FETCH_SUCCESS', payload: filtered });
+        }
       } catch (e) {
-        if (mounted) setError('Error cargando historial: ' + (e?.message || ''));
-      } finally {
-        if (mounted) setLoading(false);
+        if (mounted) dispatch({ type: 'FETCH_ERROR', payload: 'Error cargando historial: ' + (e?.message || '') });
       }
     };
     fetchHistorial();

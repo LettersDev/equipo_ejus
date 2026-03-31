@@ -25,7 +25,7 @@ const Paginacion = ({
   const getPageNumbers = () => {
     const pages = [];
     const maxVisiblePages = 5;
-    
+
     if (displayTotalPages <= maxVisiblePages) {
       // Mostrar todas las páginas
       for (let i = 1; i <= displayTotalPages; i++) {
@@ -36,35 +36,35 @@ const Paginacion = ({
       const half = Math.floor(maxVisiblePages / 2);
       let start = currentPage - half;
       let end = currentPage + half;
-      
+
       if (start < 1) {
         start = 1;
         end = maxVisiblePages;
       }
-      
+
       if (end > displayTotalPages) {
         end = displayTotalPages;
         start = displayTotalPages - maxVisiblePages + 1;
       }
-      
+
       // Agregar primera página y elipsis si es necesario
       if (start > 1) {
         pages.push(1);
         if (start > 2) pages.push('...');
       }
-      
+
       // Agregar páginas del rango
       for (let i = start; i <= end; i++) {
         pages.push(i);
       }
-      
+
       // Agregar última página y elipsis si es necesario
       if (end < displayTotalPages) {
         if (end < displayTotalPages - 1) pages.push('...');
         pages.push(displayTotalPages);
       }
     }
-    
+
     return pages;
   };
 
@@ -99,10 +99,10 @@ const Paginacion = ({
             <option value={100}>100</option>
           </select>
         </div>
-        
+
         <div className="items-info">
           <span>
-            Página {currentPage} de {displayTotalPages} • 
+            Página {currentPage} de {displayTotalPages} •
             {hasSearch ? (
               <span className="filtered-info">
                 {' '}{filteredItems.toLocaleString()} de {totalItems.toLocaleString()} registros
@@ -114,7 +114,7 @@ const Paginacion = ({
           {loading && <span className="loading-indicator"> (cargando...)</span>}
         </div>
       </div>
-      
+
       <div className="paginacion-buttons">
         <button
           onClick={() => handlePageChange(1)}
@@ -124,7 +124,7 @@ const Paginacion = ({
         >
           <ChevronsLeft size={16} />
         </button>
-        
+
         <button
           onClick={() => handlePageChange(currentPage - 1)}
           disabled={currentPage === 1 || loading || displayTotalPages === 0}
@@ -134,11 +134,11 @@ const Paginacion = ({
           <ChevronLeft size={16} />
           <span className="btn-text">Anterior</span>
         </button>
-        
+
         <div className="page-numbers">
           {getPageNumbers().map((page, index) => (
             page === '...' ? (
-              <span key={`ellipsis-${index}`} className="page-ellipsis">...</span>
+              <span key={`ellipsis-${index}-${page}`} className="page-ellipsis">...</span>
             ) : (
               <button
                 key={`page-${page}`}
@@ -152,7 +152,7 @@ const Paginacion = ({
             )
           ))}
         </div>
-        
+
         <button
           onClick={() => handlePageChange(currentPage + 1)}
           disabled={currentPage === displayTotalPages || loading || displayTotalPages === 0}
@@ -162,7 +162,7 @@ const Paginacion = ({
           <span className="btn-text">Siguiente</span>
           <ChevronRight size={16} />
         </button>
-        
+
         <button
           onClick={() => handlePageChange(displayTotalPages)}
           disabled={currentPage === displayTotalPages || loading || displayTotalPages === 0}

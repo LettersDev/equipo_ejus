@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useReducer, useCallback } from 'react';
 import Filtros from '../components/Filtros';
 import VisitanteList from '../components/VisitanteList';
 import Paginacion from '../components/Paginacion';
@@ -10,279 +10,231 @@ import Toast, { showToast } from '../components/Toast';
 import ConfirmModal from '../components/Modals/ConfirmModal';
 import { tsjService } from '../services/api';
 
+const initialState = {
+  visitantes: [],
+  searchTerm: '',
+  loading: true,
+  error: null,
+  pagination: {
+    currentPage: 1,
+    totalPages: 1,
+    itemsPerPage: 10,
+    totalItems: 0
+  },
+  filters: {},
+  modals: {
+    ver: false,
+    editar: false,
+    eliminar: false,
+    historial: false,
+    confirmSalida: false
+  },
+  selectedVisitante: null,
+  isSubmitting: false,
+  confirmSalidaId: null
+};
+
+function registrarReducer(state, action) {
+  switch (action.type) {
+    case 'FETCH_START':
+      return { ...state, loading: true, error: null };
+    case 'FETCH_SUCCESS':
+      return {
+        ...state,
+        loading: false,
+        visitantes: action.payload.visitantes,
+        pagination: { ...state.pagination, ...action.payload.pagination }
+      };
+    case 'FETCH_ERROR':
+      return { ...state, loading: false, error: action.payload };
+    case 'SET_SEARCH':
+      return { ...state, searchTerm: action.payload, pagination: { ...state.pagination, currentPage: 1 } };
+    case 'SET_PAGE':
+      return { ...state, pagination: { ...state.pagination, currentPage: action.payload } };
+    case 'SET_ITEMS_PER_PAGE':
+      return { ...state, pagination: { ...state.pagination, itemsPerPage: action.payload, currentPage: 1 } };
+    case 'SET_FILTERS':
+      return { ...state, filters: action.payload, pagination: { ...state.pagination, currentPage: 1 } };
+    case 'OPEN_MODAL':
+      return {
+        ...state,
+        modals: { ...state.modals, [action.modal]: true },
+        selectedVisitante: action.visitante || state.selectedVisitante,
+        confirmSalidaId: action.confirmSalidaId || state.confirmSalidaId
+      };
+    case 'CLOSE_MODALS':
+      return {
+        ...state,
+        modals: initialState.modals,
+        selectedVisitante: null,
+        confirmSalidaId: null
+      };
+    case 'SET_SUBMITTING':
+      return { ...state, isSubmitting: action.payload };
+    default:
+      return state;
+  }
+}
+
 const Registrar = () => {
-  // Estados para datos
-  const [visitantes, setVisitantes] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  
-  // Estados para paginación
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [totalItems, setTotalItems] = useState(0);
-  const [filters, setFilters] = useState({});
+  const [state, dispatch] = useReducer(registrarReducer, initialState);
+  const {
+    visitantes, searchTerm, loading, error,
+    pagination, filters, modals, selectedVisitante,
+    isSubmitting, confirmSalidaId
+  } = state;
 
-  // Estados para modales
-  const [modalVerOpen, setModalVerOpen] = useState(false);
-  const [modalEditarOpen, setModalEditarOpen] = useState(false);
-  const [modalEliminarOpen, setModalEliminarOpen] = useState(false);
-  const [modalHistorialOpen, setModalHistorialOpen] = useState(false);
-  const [selectedVisitante, setSelectedVisitante] = useState(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [confirmSalidaOpen, setConfirmSalidaOpen] = useState(false);
-  const [confirmSalidaId, setConfirmSalidaId] = useState(null);
-
-  // Cargar visitantes desde API - usando useCallback para evitar recreación en cada render
-  const cargarVisitantes = useCallback(async (page = 1, search = '', appliedFilters = {}) => {
+  const cargarVisitantes = useCallback(async () => {
     try {
-      setLoading(true);
-      setError(null);
+      dispatch({ type: 'FETCH_START' });
 
       const params = {
-        page: page,
-        page_size: itemsPerPage,
+        page: pagination.currentPage,
+        page_size: pagination.itemsPerPage,
         ordering: '-fecha_hora_ingreso'
       };
 
-      // Si hay término de búsqueda, agregar parámetros de búsqueda
-      if (search) {
-        params.search = search;
-      }
+      if (searchTerm) params.search = searchTerm;
 
-      // Aplicar filtros adicionales si vienen
-      if (appliedFilters) {
-        if (appliedFilters.tipo_visita) params.tipo_visita = appliedFilters.tipo_visita;
-        if (appliedFilters.municipio) params.municipio = appliedFilters.municipio;
-        if (appliedFilters.referir_a) {
-          if (appliedFilters.referir_a === 'REFERIDO') {
-            // indicar al backend que filtre referidos (no NO_REFERIDO)
-            params.referido = '1';
-          } else {
-            params.referir_a = appliedFilters.referir_a;
-          }
+      if (filters) {
+        if (filters.tipo_visita) params.tipo_visita = filters.tipo_visita;
+        if (filters.municipio) params.municipio = filters.municipio;
+        if (filters.referir_a) {
+          if (filters.referir_a === 'REFERIDO') params.referido = '1';
+          else params.referir_a = filters.referir_a;
         }
       }
 
       const response = await tsjService.getVisitantes(params);
 
-      // Manejar diferentes estructuras de respuesta (paginada vs lista simple)
-      if (response.data.results) {
-        // Respuesta paginada (DRF)
-        setVisitantes(response.data.results);
-        setTotalItems(response.data.count || response.data.results.length);
-        setTotalPages(Math.ceil((response.data.count || response.data.results.length) / itemsPerPage));
-      } else {
-        // Respuesta como lista simple
-        setVisitantes(response.data);
-        setTotalItems(response.data.length);
-        setTotalPages(Math.ceil(response.data.length / itemsPerPage));
-      }
+      const payload = response.data.results ? {
+        visitantes: response.data.results,
+        pagination: {
+          totalItems: response.data.count,
+          totalPages: Math.ceil(response.data.count / pagination.itemsPerPage)
+        }
+      } : {
+        visitantes: response.data,
+        pagination: {
+          totalItems: response.data.length,
+          totalPages: Math.ceil(response.data.length / pagination.itemsPerPage)
+        }
+      };
+
+      dispatch({ type: 'FETCH_SUCCESS', payload });
 
     } catch (err) {
-      console.error('Error cargando visitantes:', err);
-      setError(`Error al cargar visitantes: ${err.message || 'Error desconocido'}. Verifica que el backend esté funcionando.`);
-    } finally {
-      setLoading(false);
+      console.error('Error cargando:', err);
+      dispatch({ type: 'FETCH_ERROR', payload: `Error: ${err.message}` });
     }
-  }, [itemsPerPage]);
+  }, [pagination.currentPage, pagination.itemsPerPage, searchTerm, filters]);
 
-  // Cargar datos iniciales y cuando cambien las dependencias
   useEffect(() => {
-    cargarVisitantes(currentPage, searchTerm, filters);
-  }, [cargarVisitantes, currentPage, searchTerm, filters]);
+    cargarVisitantes();
+  }, [cargarVisitantes]);
 
-  // Manejar cambio de página
-  const handlePageChange = (page) => {
-    setCurrentPage(page);
-  };
+  const handlePageChange = (page) => dispatch({ type: 'SET_PAGE', payload: page });
 
-  // Manejar cambio de items por página
-  const handleItemsPerPageChange = (value) => {
-    setItemsPerPage(value);
-    setCurrentPage(1); // Volver a la primera página
-  };
+  const handleItemsPerPageChange = (val) => dispatch({ type: 'SET_ITEMS_PER_PAGE', payload: val });
 
-  const handleFilterChange = React.useCallback((newFilters) => {
-    setFilters(newFilters || {});
-    setCurrentPage(1);
-  }, []);
+  const handleFilterChange = useCallback((f) => dispatch({ type: 'SET_FILTERS', payload: f || {} }), []);
 
-  // Manejar búsqueda
-  const handleSearch = (term) => {
-    setSearchTerm(term);
-    setCurrentPage(1); // Volver a la primera página al buscar
-  };
+  const handleSearch = (term) => dispatch({ type: 'SET_SEARCH', payload: term });
 
-  // ========== FUNCIONES PARA MODALES ==========
-  
-  // Ver detalles
-  const handleAbrirVer = (visitante) => {
-    setSelectedVisitante(visitante);
-    setModalVerOpen(true);
-  };
+  const handleAbrirVer = (v) => dispatch({ type: 'OPEN_MODAL', modal: 'ver', visitante: v });
+  const handleAbrirHistorial = (v) => dispatch({ type: 'OPEN_MODAL', modal: 'historial', visitante: v });
+  const handleAbrirEditar = (v) => dispatch({ type: 'OPEN_MODAL', modal: 'editar', visitante: v });
+  const handleAbrirEliminar = (v) => dispatch({ type: 'OPEN_MODAL', modal: 'eliminar', visitante: v });
 
-  // Historial por cédula (abre modal específico)
-  const handleAbrirHistorial = (visitante) => {
-    setSelectedVisitante(visitante);
-    setModalHistorialOpen(true);
-  };
+  const handleRegistrarSalida = (id) => dispatch({ type: 'OPEN_MODAL', modal: 'confirmSalida', confirmSalidaId: id });
 
-  const handleCerrarVer = () => {
-    setModalVerOpen(false);
-    setSelectedVisitante(null);
-  };
-  const handleCerrarHistorial = () => {
-    setModalHistorialOpen(false);
-    setSelectedVisitante(null);
-  };
+  const handleCerrarModals = () => dispatch({ type: 'CLOSE_MODALS' });
 
-  // Editar
-  const handleAbrirEditar = (visitante) => {
-    setSelectedVisitante(visitante);
-    setModalEditarOpen(true);
-  };
-
-  const handleCerrarEditar = () => {
-    setModalEditarOpen(false);
-    setSelectedVisitante(null);
-  };
-
-  // Guardar cambios (editar)
   const handleGuardarVisitante = async (formData) => {
     try {
-      setIsSubmitting(true);
-      
+      dispatch({ type: 'SET_SUBMITTING', payload: true });
       if (formData.id) {
-        // Editar existente
         await tsjService.updateVisitante(formData.id, formData);
         showToast('Visitante actualizado exitosamente', 'success');
       } else {
-        // Crear nuevo (por si acaso)
         await tsjService.createVisitante(formData);
         showToast('Visitante creado exitosamente', 'success');
       }
-      
-      // Recargar datos
-      cargarVisitantes(currentPage, searchTerm);
-      handleCerrarEditar();
-      
+      cargarVisitantes();
+      handleCerrarModals();
     } catch (err) {
-      console.error('Error guardando visitante:', err);
-      const errorMessage = err.response?.data;
-      
-        if (typeof errorMessage === 'object') {
-        // Mostrar errores específicos del formulario
-        const errores = Object.entries(errorMessage)
-          .map(([campo, mensajes]) => `${campo}: ${Array.isArray(mensajes) ? mensajes.join(', ') : mensajes}`)
-          .join('\n');
-        showToast(`Errores en el formulario:\n${errores}`, 'warning');
+      console.error('Error guardando:', err);
+      const msg = err.response?.data;
+      if (typeof msg === 'object') {
+        const errors = Object.entries(msg).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join('\n');
+        showToast(`Errores: ${errors}`, 'warning');
       } else {
-        showToast(`Error al guardar visitante: ${err.response?.data?.detail || err.message || 'Error desconocido'}`, 'danger');
+        showToast(`Error: ${err.message}`, 'danger');
       }
     } finally {
-      setIsSubmitting(false);
+      dispatch({ type: 'SET_SUBMITTING', payload: false });
     }
-  };
-
-  // Registrar salida
-  const handleRegistrarSalida = async (id) => {
-    setConfirmSalidaId(id);
-    setConfirmSalidaOpen(true);
   };
 
   const handleConfirmSalida = async () => {
-    const id = confirmSalidaId;
-    setConfirmSalidaOpen(false);
-    setConfirmSalidaId(null);
     try {
-      await tsjService.registrarSalida(id);
+      await tsjService.registrarSalida(confirmSalidaId);
       showToast('Salida registrada exitosamente', 'success');
-      cargarVisitantes(currentPage, searchTerm);
+      cargarVisitantes();
     } catch (err) {
-      console.error('Error registrando salida:', err);
-      showToast(`Error al registrar salida: ${err.response?.data?.detail || err.message || 'Error desconocido'}`, 'danger');
+      showToast(`Error: ${err.message}`, 'danger');
+    } finally {
+      handleCerrarModals();
     }
-  };
-
-  // Eliminar
-  const handleAbrirEliminar = (visitante) => {
-    setSelectedVisitante(visitante);
-    setModalEliminarOpen(true);
-  };
-
-  const handleCerrarEliminar = () => {
-    setModalEliminarOpen(false);
-    setSelectedVisitante(null);
   };
 
   const handleConfirmarEliminar = async () => {
     if (!selectedVisitante) return;
-    
     try {
       await tsjService.deleteVisitante(selectedVisitante.id);
-      showToast('Visitante eliminado exitosamente', 'success');
-      cargarVisitantes(currentPage, searchTerm);
-      handleCerrarEliminar();
+      showToast('Eliminado exitosamente', 'success');
+      cargarVisitantes();
     } catch (err) {
-      console.error('Error eliminando visitante:', err);
-      showToast(`Error al eliminar visitante: ${err.response?.data?.detail || err.message || 'Error desconocido'}`, 'danger');
+      showToast(`Error: ${err.message}`, 'danger');
+    } finally {
+      handleCerrarModals();
     }
   };
-
-  // Refresh datos
-  const handleRefresh = () => {
-    cargarVisitantes(currentPage, searchTerm);
-  };
-
-  // Mostrar carga mientras mantenemos los filtros y la interfaz visible
-  // Evitar retorno temprano que desmonta el input de búsqueda y provoca pérdida de foco
 
   return (
     <div className="registros-container">
       <Toast />
-      <Filtros 
-        searchTerm={searchTerm} 
+      <Filtros
+        searchTerm={searchTerm}
         setSearchTerm={handleSearch}
-        onRefresh={handleRefresh}
-        itemsPerPage={itemsPerPage}
+        onRefresh={cargarVisitantes}
+        itemsPerPage={pagination.itemsPerPage}
         onItemsPerPageChange={handleItemsPerPageChange}
         onFilterChange={handleFilterChange}
       />
+
       {loading && visitantes.length === 0 && (
         <div className="loading-container" style={{ marginTop: '1rem' }}>
           <div className="loading-spinner"></div>
           <p>Cargando registros...</p>
         </div>
       )}
-      
+
       {error && (
         <div className="alert alert-warning">
           <span>{error}</span>
-          <button 
-            onClick={handleRefresh}
-            className="btn-outline"
-            style={{ marginLeft: '1rem' }}
-          >
-            Reintentar
-          </button>
+          <button onClick={cargarVisitantes} className="btn-outline" style={{ marginLeft: '1rem' }}>Reintentar</button>
         </div>
       )}
-      
-      {/* Contador de resultados */}
+
       <div className="results-info">
         <p>
-          Mostrando <strong>{visitantes.length}</strong> de <strong>{totalItems}</strong> registros
-          {searchTerm && (
-            <span className="search-info">
-              {' '}para "<em>{searchTerm}</em>"
-            </span>
-          )}
+          Mostrando <strong>{visitantes.length}</strong> de <strong>{pagination.totalItems}</strong> registros
+          {searchTerm && <span className="search-info"> para "<em>{searchTerm}</em>"</span>}
         </p>
       </div>
-      
-      <VisitanteList 
+
+      <VisitanteList
         visitantes={visitantes}
         handleAbrirVer={handleAbrirVer}
         handleAbrirHistorial={handleAbrirHistorial}
@@ -291,60 +243,30 @@ const Registrar = () => {
         handleAbrirEliminar={handleAbrirEliminar}
         loading={loading}
       />
-      
-      {/* Componente de Paginación */}
-      {totalPages > 1 && (
+
+      {pagination.totalPages > 1 && (
         <Paginacion
-          currentPage={currentPage}
-          totalPages={totalPages}
-          itemsPerPage={itemsPerPage}
-          totalItems={totalItems}
+          currentPage={pagination.currentPage}
+          totalPages={pagination.totalPages}
+          itemsPerPage={pagination.itemsPerPage}
+          totalItems={pagination.totalItems}
           onPageChange={handlePageChange}
           onItemsPerPageChange={handleItemsPerPageChange}
           loading={loading}
         />
       )}
-      
-      {/* ========== MODALES ========== */}
-      
-      {/* Modal Ver Detalles */}
-      <ModalVerDetalles
-        isOpen={modalVerOpen}
-        onClose={handleCerrarVer}
-        visitante={selectedVisitante}
-      />
 
-      {/* Modal Historial (visitas por cédula) */}
-      <ModalHistorial
-        isOpen={modalHistorialOpen}
-        onClose={handleCerrarHistorial}
-        cedula={selectedVisitante?.cedula}
-      />
-      
-      {/* Modal Editar (usando VisitanteForm) */}
-      <VisitanteForm
-        isOpen={modalEditarOpen}
-        onClose={handleCerrarEditar}
-        onSubmit={handleGuardarVisitante}
-        initialData={selectedVisitante}
-        isEdit={true}
-        isSubmitting={isSubmitting}
-      />
-      
-      {/* Modal Eliminar */}
-      <ModalConfirmarEliminar
-        isOpen={modalEliminarOpen}
-        onClose={handleCerrarEliminar}
-        visitante={selectedVisitante}
-        onConfirm={handleConfirmarEliminar}
-      />
+      <ModalVerDetalles isOpen={modals.ver} onClose={handleCerrarModals} visitante={selectedVisitante} />
+      <ModalHistorial isOpen={modals.historial} onClose={handleCerrarModals} cedula={selectedVisitante?.cedula} />
+      <VisitanteForm isOpen={modals.editar} onClose={handleCerrarModals} onSubmit={handleGuardarVisitante} initialData={selectedVisitante} isEdit={true} isSubmitting={isSubmitting} />
+      <ModalConfirmarEliminar isOpen={modals.eliminar} onClose={handleCerrarModals} visitante={selectedVisitante} onConfirm={handleConfirmarEliminar} />
 
       <ConfirmModal
-        isOpen={confirmSalidaOpen}
+        isOpen={modals.confirmSalida}
         title="Registrar salida"
         message="¿Está seguro de registrar la salida de este visitante?"
         onConfirm={handleConfirmSalida}
-        onCancel={() => { setConfirmSalidaOpen(false); setConfirmSalidaId(null); }}
+        onCancel={handleCerrarModals}
         confirmLabel="Registrar salida"
       />
     </div>

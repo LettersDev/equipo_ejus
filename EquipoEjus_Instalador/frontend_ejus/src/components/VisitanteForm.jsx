@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, memo } from 'react';
 import { UserPlus, Save, MapPin, Navigation } from 'lucide-react';
 import { tsjService } from '../services/api';
 import { showToast } from './Toast';
-import { estadoLara, municipiosLara, parroquiasPorMunicipioLara } from './venezuelaData';
+import { estadoLara, municipiosLara, parroquiasPorMunicipioLara, institucionesPorTramite } from './venezuelaData';
 
 // Datos iniciales que coinciden con tu modelo Django
 const initialFormData = {
@@ -20,10 +20,10 @@ const initialFormData = {
   atencion_completada: false
 };
 
-const VisitanteForm = memo(({ 
-  isOpen, 
-  onClose, 
-  onSubmit, 
+const VisitanteForm = memo(({
+  isOpen,
+  onClose,
+  onSubmit,
   isSubmitting: externalIsSubmitting,
   initialData,
   isEdit = false
@@ -119,7 +119,7 @@ const VisitanteForm = memo(({
         // Asegurarse de que el estado siempre sea Lara
         const dataConEstado = { ...initialData, estado: estadoLara.id };
         setFormData(dataConEstado);
-        
+
         // Cargar parroquias si hay municipio
         if (initialData.municipio) {
           const parroquiasMunicipio = parroquiasPorMunicipioLara[initialData.municipio] || [];
@@ -127,7 +127,7 @@ const VisitanteForm = memo(({
         }
       } else {
         // IMPORTANTE: Resetear a datos iniciales cuando NO hay initialData (nuevo registro)
-          setFormData(initialFormData);
+        setFormData(initialFormData);
         setParroquias([]);
       }
     }
@@ -138,7 +138,7 @@ const VisitanteForm = memo(({
     if (formData.municipio) {
       const parroquiasMunicipio = parroquiasPorMunicipioLara[formData.municipio] || [];
       setParroquias(parroquiasMunicipio);
-      
+
       // Resetear parroquia si no está en las nuevas parroquias
       if (formData.parroquia && !parroquiasMunicipio.some(p => p.id === formData.parroquia)) {
         setFormData(prev => ({ ...prev, parroquia: '' }));
@@ -148,6 +148,23 @@ const VisitanteForm = memo(({
       setFormData(prev => ({ ...prev, parroquia: '' }));
     }
   }, [formData.municipio]);
+
+  // Calcular instituciones disponibles según el tipo de trámite.
+  // Siempre se incluyen NO_REFERIDO y OTRA_INSTITUCION como opciones de escape.
+  const institucionesFiltradas = (() => {
+    const permitidas = institucionesPorTramite[formData.tipo_visita];
+    if (!permitidas) return institucionOpciones; // sin restricción → todas
+    const siempre = ['NO_REFERIDO', 'OTRA_INSTITUCION'];
+    return institucionOpciones.filter(([value]) => permitidas.includes(value) || siempre.includes(value));
+  })();
+
+  // Cuando cambia tipo_visita, si la institución actual no está en la nueva lista → resetear
+  useEffect(() => {
+    const permitidas = institucionesPorTramite[formData.tipo_visita];
+    if (permitidas && formData.referir_a && !permitidas.includes(formData.referir_a)) {
+      setFormData(prev => ({ ...prev, referir_a: 'NO_REFERIDO' }));
+    }
+  }, [formData.tipo_visita]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Función para resetear el formulario completamente
   const resetForm = useCallback(() => {
@@ -184,71 +201,80 @@ const VisitanteForm = memo(({
 
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
-    
-    // Validación básica
+
+    // 1. Validaciones básicas
     if (!formData.nombre || !formData.cedula || !formData.tipo_visita) {
       showToast('Por favor complete los campos obligatorios: Nombre, Cédula y Tipo de trámite', 'warning');
       return;
     }
 
-    // Validar cédula (entre 6 y 20 caracteres)
     if (formData.cedula.length < 6 || formData.cedula.length > 20) {
       showToast('La cédula debe tener entre 6 y 20 caracteres', 'warning');
       return;
     }
 
-    // Validar municipio seleccionado
-    if (!formData.municipio) {
-      showToast('Por favor seleccione un municipio', 'warning');
+    if (!formData.municipio || !formData.parroquia) {
+      showToast('Por favor seleccione municipio y parroquia', 'warning');
       return;
     }
 
-    // Validar parroquia seleccionada
-    if (!formData.parroquia) {
-      showToast('Por favor seleccione una parroquia', 'warning');
-      return;
-    }
-
-    // Validar si seleccionó OTRA_INSTITUCION pero no especificó cuál
     if (formData.referir_a === 'OTRA_INSTITUCION' && !formData.otra_institucion) {
       showToast('Si selecciona "Otra Institución", debe especificar cuál', 'warning');
       return;
     }
 
     const submitting = externalIsSubmitting !== undefined ? externalIsSubmitting : isSubmitting;
-    
+
     if (!submitting) {
       try {
         setIsSubmitting(true);
-        
+
         // Obtener nombres completos de municipio y parroquia
         const municipioSeleccionado = municipiosLara.find(m => m.id === formData.municipio);
         const parroquiaSeleccionada = parroquias.find(p => p.id === formData.parroquia);
-        
+
+        const municipioNombre = municipioSeleccionado?.nombre || formData.municipio;
+        const parroquiaNombre = parroquiaSeleccionada?.nombre || formData.parroquia;
+
         // Crear dirección completa
         const direccionCompleta = [
           formData.direccion,
-          parroquiaSeleccionada?.nombre,
-          municipioSeleccionado?.nombre,
+          parroquiaNombre,
+          municipioNombre,
           estadoLara.nombre
         ].filter(Boolean).join(', ');
-        
-        // Preparar datos para enviar
+
+        // A. Preparar datos para tu base de datos principal (Django)
         const datosParaEnviar = {
           ...formData,
-          municipio: municipioSeleccionado?.nombre || formData.municipio,
-          parroquia: parroquiaSeleccionada?.nombre || formData.parroquia,
+          municipio: municipioNombre,
+          parroquia: parroquiaNombre,
           direccion: direccionCompleta
         };
-        
+
+        // B. Preparar datos simplificados para Google Sheets (Mapa)
+        const datosParaMapa = {
+          municipio: municipioNombre,
+          parroquia: parroquiaNombre,
+          tipo_visita: formData.tipo_visita
+        };
+
+        // 1. Enviar a tu API principal
         await onSubmit(datosParaEnviar);
-        
-        // IMPORTANTE: Resetear el formulario después de enviar exitosamente
-        // Solo si NO es edición (para nuevo registro)
+
+        // 2. Enviar a Google Sheets (sin esperar a que responda para no retrasar al usuario)
+        fetch("https://script.google.com/macros/s/AKfycbwH4QtRYbEIeeYvTJHNh8w4-LLNGY_hJy01FyzbrqVVDcuKU4mJJSe8d7s2UUNsYJCO/exec", {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(datosParaMapa)
+        }).catch(err => console.error("Error enviando al mapa:", err));
+
+        // Resetear si es nuevo registro
         if (!isEdit) {
           resetForm();
         }
-        
+
       } catch (error) {
         console.error('Error en formulario:', error);
         showToast(`Error al guardar: ${error.response?.data?.detail || error.message || 'Error desconocido'}`, 'danger');
@@ -257,7 +283,6 @@ const VisitanteForm = memo(({
       }
     }
   }, [formData, parroquias, onSubmit, externalIsSubmitting, isSubmitting, isEdit, resetForm]);
-
   const handleCancel = useCallback(() => {
     // Solo resetear si NO es edición (para nuevo registro)
     if (!isEdit) {
@@ -294,10 +319,11 @@ const VisitanteForm = memo(({
               {/* Información personal */}
               <div className="form-section">
                 <h4>Información Personal</h4>
-                
+
                 <div className="form-group">
-                  <label>Nombre Completo *</label>
+                  <label htmlFor="nombre">Nombre Completo *</label>
                   <input
+                    id="nombre"
                     type="text"
                     name="nombre"
                     required
@@ -308,10 +334,11 @@ const VisitanteForm = memo(({
                     disabled={submitting}
                   />
                 </div>
-                
+
                 <div className="form-group">
-                  <label>Cédula *</label>
+                  <label htmlFor="cedula">Cédula *</label>
                   <input
+                    id="cedula"
                     type="text"
                     name="cedula"
                     required
@@ -362,10 +389,11 @@ const VisitanteForm = memo(({
                     </div>
                   )}
                 </div>
-                
+
                 <div className="form-group">
-                  <label>Teléfono</label>
+                  <label htmlFor="telefono">Teléfono</label>
                   <input
+                    id="telefono"
                     type="tel"
                     name="telefono"
                     value={formData.telefono}
@@ -380,10 +408,11 @@ const VisitanteForm = memo(({
               {/* Información de ubicación - Lara */}
               <div className="form-section">
                 <h4><MapPin size={16} /> Ubicación (Estado Lara)</h4>
-                
+
                 <div className="form-group">
-                  <label>Estado</label>
+                  <label htmlFor="estado-display">Estado</label>
                   <input
+                    id="estado-display"
                     type="text"
                     value={estadoLara.nombre}
                     disabled
@@ -400,12 +429,13 @@ const VisitanteForm = memo(({
                     value={estadoLara.id}
                   />
                 </div>
-                
+
                 <div className="form-group">
-                  <label>
+                  <label htmlFor="municipio">
                     <Navigation size={14} /> Municipio *
                   </label>
                   <select
+                    id="municipio"
                     name="municipio"
                     required
                     value={formData.municipio}
@@ -425,10 +455,11 @@ const VisitanteForm = memo(({
                     </small>
                   )}
                 </div>
-                
+
                 <div className="form-group">
-                  <label>Parroquia *</label>
+                  <label htmlFor="parroquia">Parroquia *</label>
                   <select
+                    id="parroquia"
                     name="parroquia"
                     required
                     value={formData.parroquia}
@@ -448,10 +479,11 @@ const VisitanteForm = memo(({
                     </small>
                   )}
                 </div>
-                
+
                 <div className="form-group full-width">
-                  <label>Dirección Completa</label>
+                  <label htmlFor="direccion">Dirección Completa</label>
                   <textarea
+                    id="direccion"
                     name="direccion"
                     value={formData.direccion}
                     onChange={handleChange}
@@ -474,10 +506,11 @@ const VisitanteForm = memo(({
               {/* Información del trámite */}
               <div className="form-section">
                 <h4>Información del Trámite</h4>
-                
+
                 <div className="form-group">
-                  <label>Tipo de Trámite *</label>
+                  <label htmlFor="tipo_visita">Tipo de Trámite *</label>
                   <select
+                    id="tipo_visita"
                     name="tipo_visita"
                     required
                     value={formData.tipo_visita}
@@ -492,27 +525,34 @@ const VisitanteForm = memo(({
                     ))}
                   </select>
                 </div>
-                
+
                 <div className="form-group">
-                  <label>Referir a Institución</label>
+                  <label htmlFor="referir_a">Referir a Institución</label>
                   <select
+                    id="referir_a"
                     name="referir_a"
                     value={formData.referir_a}
                     onChange={handleChange}
                     disabled={submitting}
                   >
-                    {institucionOpciones.map(([value, label]) => (
+                    {institucionesFiltradas.map(([value, label]) => (
                       <option key={value} value={value}>
                         {label}
                       </option>
                     ))}
                   </select>
+                  {institucionesPorTramite[formData.tipo_visita] && (
+                    <small className="field-hint">
+                      Mostrando {institucionesFiltradas.length} institución(es) para este trámite
+                    </small>
+                  )}
                 </div>
-                
+
                 {formData.referir_a === 'OTRA_INSTITUCION' && (
                   <div className="form-group">
-                    <label>Especifique otra institución *</label>
+                    <label htmlFor="otra_institucion">Especifique otra institución *</label>
                     <input
+                      id="otra_institucion"
                       type="text"
                       name="otra_institucion"
                       required
@@ -529,8 +569,9 @@ const VisitanteForm = memo(({
               {/* Observaciones */}
               <div className="form-section full-width">
                 <div className="form-group full-width">
-                  <label>Observaciones</label>
+                  <label htmlFor="observaciones">Observaciones</label>
                   <textarea
+                    id="observaciones"
                     name="observaciones"
                     value={formData.observaciones}
                     onChange={handleChange}
@@ -541,18 +582,18 @@ const VisitanteForm = memo(({
                 </div>
               </div>
             </div>
-            
+
             <div className="modal-footer">
-              <button 
-                type="button" 
-                className="btn-secondary" 
+              <button
+                type="button"
+                className="btn-secondary"
                 onClick={handleCancel}
                 disabled={submitting}
               >
                 Cancelar
               </button>
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 className="btn-primary"
                 disabled={submitting}
               >

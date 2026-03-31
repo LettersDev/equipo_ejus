@@ -71,95 +71,95 @@ const ModalVerDetalles = ({ isOpen, onClose, visitante }) => {
           <div className="detalles-container">
             <div className="detalle-grid">
               <div className="detalle-item">
-                <label>Nombre Completo</label>
+                <span className="label-text">Nombre Completo</span>
                 <p className="value">{visitante.nombre || 'No especificado'}</p>
               </div>
-              
+
               <div className="detalle-item">
-                <label>Municipio</label>
+                <span className="label-text">Municipio</span>
                 <p className="value">{visitante.municipio || 'No especificado'}</p>
               </div>
-              
+
               <div className="detalle-item">
-                <label>Parroquia</label>
+                <span className="label-text">Parroquia</span>
                 <p className="value">{visitante.parroquia || 'No especificado'}</p>
               </div>
-              
+
               <div className="detalle-item">
-                <label>Dirección</label>
+                <span className="label-text">Dirección</span>
                 <p className="value">{visitante.direccion || 'No especificado'}</p>
               </div>
-              
+
               <div className="detalle-item">
-                <label>Tipo de Trámite</label>
+                <span className="label-text">Tipo de Trámite</span>
                 <p className="value">{formatTipoVisita(visitante.tipo_visita)}</p>
               </div>
-              
+
               <div className="detalle-item">
-                <label>Referir a</label>
+                <span className="label-text">Referir a</span>
                 <p className="value">{formatInstitucion(visitante)}</p>
               </div>
-              
+
               <div className="detalle-item">
-                <label>Fecha y Hora de Ingreso:</label>
-                <p>{visitante.fecha_hora_ingreso ? 
-                  new Date(visitante.fecha_hora_ingreso).toLocaleString('es-VE') : 
+                <span className="label-text">Fecha y Hora de Ingreso:</span>
+                <p>{visitante.fecha_hora_ingreso ?
+                  new Date(visitante.fecha_hora_ingreso).toLocaleString('es-VE') :
                   'No registrada'}</p>
               </div>
-              
+
               <div className="detalle-item">
-                <label>Fecha y Hora de Salida:</label>
-                <p>{visitante.fecha_hora_salida ? 
-                  new Date(visitante.fecha_hora_salida).toLocaleString('es-VE') : 
+                <span className="label-text">Fecha y Hora de Salida:</span>
+                <p>{visitante.fecha_hora_salida ?
+                  new Date(visitante.fecha_hora_salida).toLocaleString('es-VE') :
                   'No registrada'}</p>
               </div>
-              
+
               <div className="detalle-item">
-                <label>Estado</label>
+                <span className="label-text">Estado</span>
                 <div>
                   <span className={`status-badge ${visitante.atencion_completada ? 'completed' : 'active'}`}>
                     {visitante.atencion_completada ? 'Completado' : 'En atención'}
                   </span>
                 </div>
               </div>
-              
+
               <div className="detalle-item">
-                <label>Duración:</label>
+                <span className="label-text">Duración:</span>
                 <p>{visitante.duracion_atencion || 'En atención'}</p>
               </div>
-              
+
               {visitante.observaciones && (
                 <div className="detalle-item full-width">
-                  <label>Observaciones</label>
+                  <span className="label-text">Observaciones</span>
                   <div className="observaciones-detalle">{visitante.observaciones}</div>
                 </div>
               )}
 
               {visitante.historial && (
                 <div className="detalle-item full-width">
-                  <label>Historial</label>
+                  <span className="label-text">Historial</span>
                   <div className="historial-content">
                     {visitante.historial.split('\n').map((line, idx) => (
-                      <div key={idx} className="historial-line">{line}</div>
+                      <div key={`hist-${visitante.id}-${idx}`} className="historial-line">{line}</div>
                     ))}
                   </div>
                 </div>
               )}
-              
+
               <div className="detalle-item">
-                <label>Registrado el:</label>
-                <p>{visitante.creado_en ? 
-                  new Date(visitante.creado_en).toLocaleString('es-VE') : 
+                <span className="label-text">Registrado el:</span>
+                <p>{visitante.creado_en ?
+                  new Date(visitante.creado_en).toLocaleString('es-VE') :
                   'No disponible'}</p>
                 {visitante.creado_por && (
                   <p className="meta-small">Creado por: {visitante.creado_por}</p>
                 )}
               </div>
-              
+
               <div className="detalle-item">
-                <label>Última actualización:</label>
-                <p>{visitante.actualizado_en ? 
-                  new Date(visitante.actualizado_en).toLocaleString('es-VE') : 
+                <span className="label-text">Última actualización:</span>
+                <p>{visitante.actualizado_en ?
+                  new Date(visitante.actualizado_en).toLocaleString('es-VE') :
                   'No disponible'}</p>
                 {visitante.actualizado_por && (
                   <p className="meta-small">Actualizado por: {visitante.actualizado_por}</p>

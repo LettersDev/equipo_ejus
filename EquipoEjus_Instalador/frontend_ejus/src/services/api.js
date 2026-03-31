@@ -125,11 +125,10 @@ export const tsjService = {
     },
 
     // Nuevo: Reporte de referidos a instituciones
-    getReporteReferidos: async (periodo = 'mes') => {
+    getReporteReferidos: async (periodo = 'mes', filters = {}) => {
         try {
-            const response = await api.get('/reportes/referidos/', {
-                params: { periodo }
-            });
+            const params = { periodo, ...filters };
+            const response = await api.get('/reportes/referidos/', { params });
             return response;
         } catch (error) {
             console.error('Error obteniendo reporte de referidos:', error);
@@ -162,20 +161,19 @@ export const tsjService = {
         }
     },
 
-    exportarReporteExcel: async (periodo = 'mes', filters = {}) => {
+
+    // Auditoría del sistema
+    getAuditLogs: async (params = {}) => {
         try {
-            const params = { periodo, ...filters };
-            const response = await api.get('/reportes/exportar/excel/', {
-                params,
-                responseType: 'blob'
-            });
-            return response;
+            const response = await api.get('/audit/logs/', { params });
+            return response.data;
         } catch (error) {
-            console.error('Error exportando Excel:', error);
+            console.error('Error obteniendo logs de auditoría:', error);
             throw error;
         }
-    }
+    },
 };
+
 
 // Update endpoints
 tsjService.getVersion = async () => {
@@ -196,7 +194,13 @@ tsjService.login = async (username, password) => {
     const resp = await api.post('/auth/login/', { username, password });
     // validate response
     if (!resp?.data?.token) throw new Error('Token no recibido del servidor');
-    const payload = { token: resp.data.token, name: resp.data.username, id: resp.data.id };
+    const payload = {
+        token: resp.data.token,
+        name: resp.data.displayName,
+        username: resp.data.username,
+        id: resp.data.id
+    };
+
     localStorage.setItem('currentUser', JSON.stringify(payload));
     localStorage.setItem('authToken', resp.data.token);
     return payload;
@@ -224,7 +228,13 @@ tsjService.getCurrentUser = async () => {
 tsjService.register = async (username, password, full_name = '') => {
     const resp = await api.post('/auth/register/', { username, password, full_name });
     if (!resp?.data?.token) throw new Error('Token no recibido del servidor');
-    const payload = { token: resp.data.token, name: resp.data.username, id: resp.data.id };
+    const payload = {
+        token: resp.data.token,
+        name: resp.data.displayName,
+        username: resp.data.username,
+        id: resp.data.id
+    };
+
     localStorage.setItem('currentUser', JSON.stringify(payload));
     localStorage.setItem('authToken', resp.data.token);
     return payload;

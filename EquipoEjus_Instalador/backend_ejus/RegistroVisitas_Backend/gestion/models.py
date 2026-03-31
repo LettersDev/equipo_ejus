@@ -189,3 +189,65 @@ class Persona(models.Model):
         verbose_name = 'Persona'
         verbose_name_plural = 'Personas'
         indexes = [models.Index(fields=['cedula'])]
+
+
+class AuditLog(models.Model):
+    """Registro de auditoría de acciones realizadas por los usuarios."""
+
+    ACCION_CHOICES = [
+        ('CREATE', 'Crear'),
+        ('UPDATE', 'Actualizar'),
+        ('DELETE', 'Eliminar'),
+        ('LOGIN', 'Iniciar sesión'),
+        ('LOGOUT', 'Cerrar sesión'),
+        ('REPORT', 'Reporte/Exportar'),
+    ]
+
+    usuario = models.CharField(
+        max_length=150,
+        blank=True,
+        null=True,
+        verbose_name="Usuario"
+    )
+    accion = models.CharField(
+        max_length=10,
+        choices=ACCION_CHOICES,
+        verbose_name="Acción"
+    )
+    modulo = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name="Módulo / Modelo"
+    )
+    objeto_id = models.IntegerField(
+        null=True,
+        blank=True,
+        verbose_name="ID del registro afectado"
+    )
+    descripcion = models.TextField(
+        blank=True,
+        verbose_name="Descripción"
+    )
+    fecha = models.DateTimeField(
+        default=timezone.now,
+        verbose_name="Fecha y hora"
+    )
+    ip = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+        verbose_name="Dirección IP"
+    )
+
+    class Meta:
+        ordering = ['-fecha']
+        verbose_name = 'Registro de Auditoría'
+        verbose_name_plural = 'Registros de Auditoría'
+        indexes = [
+            models.Index(fields=['usuario']),
+            models.Index(fields=['accion']),
+            models.Index(fields=['fecha']),
+            models.Index(fields=['modulo']),
+        ]
+
+    def __str__(self):
+        return f"{self.usuario} | {self.accion} | {self.modulo} | {self.fecha}"

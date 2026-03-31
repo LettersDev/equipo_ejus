@@ -1,65 +1,68 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useReducer } from 'react';
 import Estadisticas from '../components/Estadisticas';
 import { tsjService } from '../services/api';
 
+const initialState = {
+  estadisticas: null,
+  visitantes: [],
+  visitantesActivos: [],
+  loading: true,
+  error: null
+};
+
+function dashboardReducer(state, action) {
+  switch (action.type) {
+    case 'FETCH_START':
+      return { ...state, loading: true, error: null };
+    case 'FETCH_SUCCESS':
+      return {
+        ...state,
+        loading: false,
+        estadisticas: action.payload.estadisticas,
+        visitantes: action.payload.visitantes,
+        visitantesActivos: action.payload.visitantesActivos
+      };
+    case 'FETCH_ERROR':
+      return { ...state, loading: false, error: action.payload };
+    default:
+      return state;
+  }
+}
+
 const Dashboard = ({ setActiveTab }) => {
-  const [estadisticas, setEstadisticas] = useState(null);
-  const [visitantes, setVisitantes] = useState([]);
-  const [visitantesActivos, setVisitantesActivos] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [state, dispatch] = useReducer(dashboardReducer, initialState);
+  const { estadisticas, visitantes, visitantesActivos, loading, error } = state;
 
   // Cargar datos del dashboard
   const cargarDatosDashboard = async () => {
     try {
-      setLoading(true);
-      setError(null);
+      dispatch({ type: 'FETCH_START' });
 
-      // Cargar estadísticas del dashboard
-      const statsResponse = await tsjService.getEstadisticasDashboard();
-      console.log('Estadísticas dashboard:', statsResponse.data);
-        console.debug('Estadísticas dashboard:', statsResponse.data);
-      // Cargar visitantes recientes (últimos 10)
-      const visitantesResponse = await tsjService.getVisitantes({ 
-        limit: 10,
-        ordering: '-fecha_hora_ingreso'
-      });
-      console.log('Visitantes recientes:', visitantesResponse.data);
-        console.debug('Visitantes recientes:', visitantesResponse.data);
-      // Cargar visitantes activos (no completados)
-      const activosResponse = await tsjService.getVisitantes({
-        atencion_completada: false
-      });
+      // Realizar llamadas en paralelo para mejorar rendimiento
+      const [statsResponse, visitantesResponse, activosResponse] = await Promise.all([
+        tsjService.getEstadisticasDashboard(),
+        tsjService.getVisitantes({
+          limit: 10,
+          ordering: '-fecha_hora_ingreso'
+        }),
+        tsjService.getVisitantes({
+          atencion_completada: false
+        })
+      ]);
 
-      // Actualizar estados
-      setEstadisticas(statsResponse.data);
-      setVisitantes(visitantesResponse.data.results || visitantesResponse.data);
-      setVisitantesActivos(activosResponse.data.results || activosResponse.data);
+      // Actualizar estados vía reducer
+      dispatch({
+        type: 'FETCH_SUCCESS',
+        payload: {
+          estadisticas: statsResponse.data,
+          visitantes: visitantesResponse.data.results || visitantesResponse.data,
+          visitantesActivos: activosResponse.data.results || activosResponse.data
+        }
+      });
 
     } catch (err) {
       console.error('Error cargando dashboard:', err);
-      setError(`Error al cargar datos del dashboard: ${err.message || 'Error desconocido'}`);
-      
-      // Datos de ejemplo para testing
-      setEstadisticas({
-        total: 150,
-        diario: 25,
-        semanal: 120,
-        mensual: 450,
-        enSala: 8
-      });
-      
-      setVisitantes([
-        { id: 1, nombre: 'Juan Pérez', cedula: 'V12345678', tipo_visita: 'ASESORIA', estado: 'En proceso' },
-        { id: 2, nombre: 'María González', cedula: 'V87654321', tipo_visita: 'DIVORCIO_MUTUO_ACUERDO', estado: 'Completado' }
-      ]);
-      
-      setVisitantesActivos([
-        { id: 1, nombre: 'Juan Pérez', cedula: 'V12345678', tipo_visita: 'ASESORIA' },
-        { id: 3, nombre: 'Carlos Rodríguez', cedula: 'V11223344', tipo_visita: 'CURATELA' }
-      ]);
-    } finally {
-      setLoading(false);
+      dispatch({ type: 'FETCH_ERROR', payload: `Error al cargar datos del dashboard: ${err.message || 'Error desconocido'}` });
     }
   };
 
@@ -82,7 +85,7 @@ const Dashboard = ({ setActiveTab }) => {
   }
 
   return (
-    <Estadisticas 
+    <Estadisticas
       estadisticas={estadisticas}
       visitantes={visitantes}
       setActiveTab={setActiveTab}

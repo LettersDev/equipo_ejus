@@ -6,6 +6,7 @@ import './App.css';
 import Dashboard from './pages/DashBoards';
 import Registrar from './pages/Registrar';
 import Reportes from './pages/Reportes';
+import Auditoria from './pages/Auditoria';
 
 // Importar componentes
 import Navbar from './components/Navbar';
@@ -15,33 +16,60 @@ import RegisterModal from './components/Modals/ModalRegister';
 import ConfirmModal from './components/Modals/ConfirmModal';
 import { tsjService } from './services/api';
 
-function App() {
-  const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [currentUser, setCurrentUser] = useState(null);
-  const [loginOpen, setLoginOpen] = useState(false);
-  const [registerOpen, setRegisterOpen] = useState(false);
-  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+const initialState = {
+  loading: false,
+  activeTab: 'dashboard',
+  refreshKey: 0,
+  currentUser: null,
+  loginOpen: false,
+  registerOpen: false,
+  logoutConfirmOpen: false
+};
 
-  // Cargar datos iniciales (opcional - para estadísticas globales si las necesitas)
+function appReducer(state, action) {
+  switch (action.type) {
+    case 'SET_LOADING':
+      return { ...state, loading: action.payload };
+    case 'SET_TAB':
+      return { ...state, activeTab: action.payload };
+    case 'REFRESH_DATA':
+      return { ...state, refreshKey: state.refreshKey + 1 };
+    case 'SET_USER':
+      return { ...state, currentUser: action.payload, loginOpen: false, registerOpen: false };
+    case 'SET_LOGIN_OPEN':
+      return { ...state, loginOpen: action.payload };
+    case 'SET_REGISTER_OPEN':
+      return { ...state, registerOpen: action.payload };
+    case 'SET_LOGOUT_CONFIRM_OPEN':
+      return { ...state, logoutConfirmOpen: action.payload };
+    case 'TOGGLE_MODALS':
+      return { ...state, loginOpen: action.login, registerOpen: action.register };
+    case 'LOGOUT':
+      return { ...state, currentUser: null, loginOpen: true, logoutConfirmOpen: false };
+    default:
+      return state;
+  }
+}
+
+function App() {
+  const [state, dispatch] = React.useReducer(appReducer, initialState);
+  const { loading, activeTab, refreshKey, currentUser, loginOpen, registerOpen, logoutConfirmOpen } = state;
+
+  // Cargar datos iniciales
   useEffect(() => {
-    // Si necesitas cargar datos globales al iniciar la app
     const cargarDatosIniciales = async () => {
-      setLoading(true);
+      dispatch({ type: 'SET_LOADING', payload: true });
       try {
-        // Aquí puedes cargar datos iniciales si es necesario
-        // revisar si hay usuario en localStorage
         const stored = JSON.parse(localStorage.getItem('currentUser') || 'null');
         if (stored && stored.token) {
-          setCurrentUser(stored);
+          dispatch({ type: 'SET_USER', payload: stored });
         } else {
-          setLoginOpen(true);
+          dispatch({ type: 'SET_LOGIN_OPEN', payload: true });
         }
       } catch (error) {
         console.error('Error cargando datos iniciales:', error);
       } finally {
-        setLoading(false);
+        dispatch({ type: 'SET_LOADING', payload: false });
       }
     };
 
@@ -50,25 +78,22 @@ function App() {
 
   // Función para refrescar datos cuando se crea/edita/elimina un visitante
   const handleNuevoVisitanteSuccess = () => {
-    setRefreshKey(prev => prev + 1); // Forzar refresco de datos en todas las páginas
+    dispatch({ type: 'REFRESH_DATA' });
   };
 
   // Función para cambiar de tab y resetear el estado
   const handleTabChange = (tab) => {
-    setActiveTab(tab);
+    dispatch({ type: 'SET_TAB', payload: tab });
   };
 
-  // Función para logout (si implementas autenticación)
+  // Función para logout
   const handleLogout = () => {
-    // open confirm modal instead of window.confirm
-    setLogoutConfirmOpen(true);
+    dispatch({ type: 'SET_LOGOUT_CONFIRM_OPEN', payload: true });
   };
 
   const handleConfirmLogout = () => {
     tsjService.logout();
-    setCurrentUser(null);
-    setLoginOpen(true);
-    setLogoutConfirmOpen(false);
+    dispatch({ type: 'LOGOUT' });
   };
 
   if (loading) {
@@ -84,34 +109,34 @@ function App() {
   if (!currentUser) {
     return (
       <div className="app-container">
-        <Navbar 
-          activeTab={activeTab} 
+        <Navbar
+          activeTab={activeTab}
           setActiveTab={handleTabChange}
           onLogout={handleLogout}
           onNuevoVisitanteSuccess={handleNuevoVisitanteSuccess}
           currentUser={currentUser}
-          onOpenLogin={() => setLoginOpen(true)}
+          onOpenLogin={() => dispatch({ type: 'SET_LOGIN_OPEN', payload: true })}
         />
 
         <LoginModal
           isOpen={loginOpen}
-          onClose={() => setLoginOpen(false)}
-          onOpenRegister={() => { setLoginOpen(false); setRegisterOpen(true); }}
-          onSuccess={(user) => { setCurrentUser(user); setLoginOpen(false); }}
+          onClose={() => dispatch({ type: 'SET_LOGIN_OPEN', payload: false })}
+          onOpenRegister={() => dispatch({ type: 'TOGGLE_MODALS', login: false, register: true })}
+          onSuccess={(user) => dispatch({ type: 'SET_USER', payload: user })}
         />
 
         <RegisterModal
           isOpen={registerOpen}
-          onClose={() => setRegisterOpen(false)}
-          onOpenLogin={() => { setRegisterOpen(false); setLoginOpen(true); }}
-          onSuccess={(user) => { setCurrentUser(user); setRegisterOpen(false); }}
+          onClose={() => dispatch({ type: 'SET_REGISTER_OPEN', payload: false })}
+          onOpenLogin={() => dispatch({ type: 'TOGGLE_MODALS', login: true, register: false })}
+          onSuccess={(user) => dispatch({ type: 'SET_USER', payload: user })}
         />
         <ConfirmModal
           isOpen={logoutConfirmOpen}
           title="Cerrar sesión"
           message="¿Está seguro de cerrar sesión?"
           onConfirm={handleConfirmLogout}
-          onCancel={() => setLogoutConfirmOpen(false)}
+          onCancel={() => dispatch({ type: 'SET_LOGOUT_CONFIRM_OPEN', payload: false })}
           confirmLabel="Cerrar sesión"
         />
       </div>
@@ -120,34 +145,34 @@ function App() {
 
   return (
     <div className="app-container">
-      <Navbar 
-        activeTab={activeTab} 
+      <Navbar
+        activeTab={activeTab}
         setActiveTab={handleTabChange}
         onLogout={handleLogout}
         onNuevoVisitanteSuccess={handleNuevoVisitanteSuccess}
         currentUser={currentUser}
-        onOpenLogin={() => setLoginOpen(true)}
+        onOpenLogin={() => dispatch({ type: 'SET_LOGIN_OPEN', payload: true })}
       />
 
       <LoginModal
         isOpen={loginOpen}
-        onClose={() => setLoginOpen(false)}
-        onOpenRegister={() => { setLoginOpen(false); setRegisterOpen(true); }}
-        onSuccess={(user) => { setCurrentUser(user); setLoginOpen(false); }}
+        onClose={() => dispatch({ type: 'SET_LOGIN_OPEN', payload: false })}
+        onOpenRegister={() => dispatch({ type: 'TOGGLE_MODALS', login: false, register: true })}
+        onSuccess={(user) => dispatch({ type: 'SET_USER', payload: user })}
       />
 
       <RegisterModal
         isOpen={registerOpen}
-        onClose={() => setRegisterOpen(false)}
-        onOpenLogin={() => { setRegisterOpen(false); setLoginOpen(true); }}
-        onSuccess={(user) => { setCurrentUser(user); setRegisterOpen(false); }}
+        onClose={() => dispatch({ type: 'SET_REGISTER_OPEN', payload: false })}
+        onOpenLogin={() => dispatch({ type: 'TOGGLE_MODALS', login: true, register: false })}
+        onSuccess={(user) => dispatch({ type: 'SET_USER', payload: user })}
       />
       <ConfirmModal
         isOpen={logoutConfirmOpen}
         title="Cerrar sesión"
         message="¿Está seguro de cerrar sesión?"
         onConfirm={handleConfirmLogout}
-        onCancel={() => setLogoutConfirmOpen(false)}
+        onCancel={() => dispatch({ type: 'SET_LOGOUT_CONFIRM_OPEN', payload: false })}
         confirmLabel="Cerrar sesión"
       />
       {/* Contenido Principal */}
@@ -157,6 +182,7 @@ function App() {
             {activeTab === 'dashboard' && 'Dashboard de Control de Visitantes'}
             {activeTab === 'registros' && 'Registro de Visitantes'}
             {activeTab === 'reportes' && 'Reportes y Estadísticas'}
+            {activeTab === 'auditoria' && 'Auditoría del Sistema'}
           </h2>
           <div className="breadcrumb">
             <span>TSJ</span>
@@ -167,6 +193,7 @@ function App() {
               {activeTab === 'dashboard' && 'Dashboard'}
               {activeTab === 'registros' && 'Registros'}
               {activeTab === 'reportes' && 'Reportes'}
+              {activeTab === 'auditoria' && 'Auditoría'}
             </span>
           </div>
         </div>
@@ -176,6 +203,7 @@ function App() {
           {activeTab === 'dashboard' && <Dashboard key={`dashboard-${refreshKey}`} setActiveTab={handleTabChange} />}
           {activeTab === 'registros' && <Registrar key={`registrar-${refreshKey}`} />}
           {activeTab === 'reportes' && <Reportes key={`reportes-${refreshKey}`} />}
+          {activeTab === 'auditoria' && currentUser?.username === 'admin' && <Auditoria key={`auditoria-${refreshKey}`} />}
         </div>
       </main>
 
@@ -185,9 +213,9 @@ function App() {
           <div className="footer-left">
             <span>Direccion Ejecutiva de la Magistratura</span>
             <span className="divider">|</span>
-            <span>Sistema de Control de Visitantes v1.0.2</span>
+            <span>Sistema de Control de Visitantes v1.0.3</span>
           </div>
-          <div className="footer-right" style={{gap:'1.2rem'}}>
+          <div className="footer-right" style={{ gap: '1.2rem' }}>
             <span>{new Date().getFullYear()} © TSJ - Eleborado por: TSU. Luis Rodriguez</span>
             <span className="divider">|</span>
             <UpdateButton />

@@ -237,3 +237,29 @@ class ReferidosReporteSerializer(serializers.Serializer):
     porcentaje_referidos = serializers.FloatField()
     instituciones = ReferidoEstadisticasSerializer(many=True)
     metadata = serializers.DictField()
+
+
+# ========== SERIALIZER DE AUDITORÍA ==========
+
+from .models import AuditLog  # noqa: E402
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    """Serializer de solo lectura para el modelo AuditLog."""
+    accion_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AuditLog
+        fields = [
+            'id',
+            'usuario',
+            'accion',
+            'accion_display',
+            'modulo',
+            'objeto_id',
+            'descripcion',
+            'fecha',
+            'ip',
+        ]
+
+    def get_accion_display(self, obj):
+        return obj.get_accion_display()

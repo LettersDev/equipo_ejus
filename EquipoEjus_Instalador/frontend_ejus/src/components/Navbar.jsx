@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart3, Users, FileText, UserPlus, Shield, LogOut, LogIn, CloudUpload } from 'lucide-react';
+import { BarChart3, Users, FileText, UserPlus, Shield, LogOut, LogIn, ClipboardList } from 'lucide-react';
 import ModalNuevoVisitante from './Modals/ModalNuevoVisitante'
 import LoginModal from './Modals/ModalLogin'
 import { tsjService } from '../services/api'
 // import UpdateButton from './UpdateButton'
 
-const Navbar = ({ 
-  activeTab, 
+const Navbar = ({
+  activeTab,
   setActiveTab,
   onLogout,
   onNuevoVisitanteSuccess,
@@ -16,7 +16,7 @@ const Navbar = ({
 }) => {
   const [modalNuevoOpen, setModalNuevoOpen] = useState(false);
   const updateToken = (() => {
-    try{ const u = JSON.parse(localStorage.getItem('currentUser')||'null'); return u?.update_token || null }catch(e){return null}
+    try { const u = JSON.parse(localStorage.getItem('currentUser') || 'null'); return u?.update_token || null } catch (e) { return null }
   })();
 
   const handleNuevoVisitante = () => {
@@ -37,7 +37,7 @@ const Navbar = ({
         <div className="header-top">
           <div className="institution-info">
             <div className="logo-container">
-              
+
               <div>
                 <h1>TRIBUNAL SUPREMO DE JUSTICIA</h1>
                 <p className="institution-subtitle">Equipo de Justicia Social</p>
@@ -51,7 +51,7 @@ const Navbar = ({
                   <span className="profile-role">Control de Visitantes</span>
                 </div>
                 {currentUser ? (
-                  <button 
+                  <button
                     className="btn-logout"
                     onClick={async () => { await tsjService.logout(); onLogout?.(); }}
                     title="Cerrar sesión"
@@ -65,14 +65,14 @@ const Navbar = ({
                 )}
               </div>
               {/* Botón de actualización movido al footer */}
-              </div>
             </div>
           </div>
-        
+        </div>
+
 
         <nav className="main-nav">
           <div className="nav-tabs">
-            <button 
+            <button
               className={`nav-tab ${activeTab === 'dashboard' ? 'active' : ''}`}
               onClick={() => setActiveTab('dashboard')}
               title="Ver estadísticas y dashboard"
@@ -80,7 +80,7 @@ const Navbar = ({
               <BarChart3 size={18} />
               Dashboard
             </button>
-            <button 
+            <button
               className={`nav-tab ${activeTab === 'registros' ? 'active' : ''}`}
               onClick={() => setActiveTab('registros')}
               title="Ver todos los registros de visitantes"
@@ -88,7 +88,7 @@ const Navbar = ({
               <Users size={18} />
               Registros
             </button>
-            <button 
+            <button
               className={`nav-tab ${activeTab === 'reportes' ? 'active' : ''}`}
               onClick={() => setActiveTab('reportes')}
               title="Ver reportes y estadísticas avanzadas"
@@ -96,8 +96,18 @@ const Navbar = ({
               <FileText size={18} />
               Reportes
             </button>
+            {currentUser?.username === 'admin' && (
+              <button
+                className={`nav-tab ${activeTab === 'auditoria' ? 'active' : ''}`}
+                onClick={() => setActiveTab('auditoria')}
+                title="Ver auditoría del sistema"
+              >
+                <ClipboardList size={18} />
+                Auditoría
+              </button>
+            )}
           </div>
-          <button 
+          <button
             className="btn-primary"
             onClick={handleNuevoVisitante}
             title="Registrar un nuevo visitante"

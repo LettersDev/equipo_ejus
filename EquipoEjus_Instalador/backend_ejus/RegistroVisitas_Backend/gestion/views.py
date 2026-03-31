@@ -19,7 +19,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from .models import Visitante
-from .Serializers import VisitanteSerializer, EstadisticasSerializer
+from .Serializers import VisitanteSerializer, EstadisticasSerializer, AuditLogSerializer
 from django.db.models.functions import ExtractHour
 import logging
 from django.db import transaction, IntegrityError
@@ -58,6 +58,10 @@ class VisitanteViewSet(viewsets.ModelViewSet):
             # Fallback to X-Usuario header if present
             usuario = self.request.headers.get('X-Usuario') or self.request.META.get('HTTP_X_USUARIO')
 
+        # Guardar usuario actual en thread-local para el signal de auditoría
+        from .middleware import set_current_user
+        set_current_user(usuario)
+
         # Link or create Persona by cedula so we keep a person registry
         persona = None
         cedula = serializer.validated_data.get('cedula')
@@ -80,6 +84,7 @@ class VisitanteViewSet(viewsets.ModelViewSet):
 
         instance = serializer.save(persona=persona)
         if usuario:
+            instance._skip_audit = True  # evitar doble registro en el signal
             instance.historial = (instance.historial or '') + f"\nCreado por: {usuario} - {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}"
             instance.save()
 
@@ -90,8 +95,13 @@ class VisitanteViewSet(viewsets.ModelViewSet):
         else:
             usuario = self.request.headers.get('X-Usuario') or self.request.META.get('HTTP_X_USUARIO')
 
+        # Guardar usuario actual en thread-local para el signal de auditoría
+        from .middleware import set_current_user
+        set_current_user(usuario)
+
         # After updating, ensure persona is linked/updated if cedula changed
         instance = serializer.save()
+        instance._skip_audit = True # El primer save ya disparó el signal, los siguientes se saltan
         cedula = serializer.validated_data.get('cedula')
         if cedula:
             from .models import Persona
@@ -116,9 +126,19 @@ class VisitanteViewSet(viewsets.ModelViewSet):
                 logger.exception('Error creando o enlazando Persona en perform_update: %s', e)
 
         if usuario:
+            # Notar que ya pusimos _skip_audit = True arriba, el signal ya se ejecutó con el usuario en thread-local
             instance.historial = (instance.historial or '') + f"\nActualizado por: {usuario} - {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}"
             instance.save()
     
+    def perform_destroy(self, instance):
+        usuario = None
+        if hasattr(self.request, 'user') and self.request.user and self.request.user.is_authenticated:
+            usuario = self.request.user.get_full_name() or self.request.user.username
+        
+        from .middleware import set_current_user
+        set_current_user(usuario)
+        instance.delete()
+
     def get_queryset(self):
         # Use select_related for persona and annotate visit_count to reduce DB queries
         queryset = Visitante.objects.select_related('persona').annotate(visit_count=Count('persona__visitas'))
@@ -185,9 +205,18 @@ class VisitanteViewSet(viewsets.ModelViewSet):
         # Devolver directamente el diccionario (no es necesario serializar aquí)
         return Response(data)
     
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], url_path='registrar-salida')
     def registrar_salida(self, request, pk=None):
         visitante = self.get_object()
+        
+        # Auditoría: Capturar usuario
+        usuario = None
+        if request.user and request.user.is_authenticated:
+            usuario = request.user.get_full_name() or request.user.username
+        
+        from .middleware import set_current_user
+        set_current_user(usuario)
+        
         visitante.fecha_hora_salida = timezone.now()
         visitante.atencion_completada = True
         visitante.save()
@@ -205,23 +234,46 @@ class ReporteTramitesView(APIView):
         tipo_param = request.GET.get('tipo_visita')
         referir_param = request.GET.get('referir_a')
         
-        # Calcular fecha de inicio según el período
-        fecha_actual = timezone.now()
-        if periodo == 'hoy':
-            fecha_inicio = fecha_actual.replace(hour=0, minute=0, second=0, microsecond=0)
-        elif periodo == 'semana':
-            fecha_inicio = fecha_actual - timedelta(days=7)
-        elif periodo == 'mes':
-            fecha_inicio = fecha_actual.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        elif periodo == 'trimestre':
-            fecha_inicio = fecha_actual - timedelta(days=90)
-        elif periodo == 'anio':
-            fecha_inicio = fecha_actual.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-        else:
-            fecha_inicio = fecha_actual.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        # Calcular fecha de inicio según el período o rango personalizado
+        fecha_desde = request.GET.get('fecha_desde')
+        fecha_hasta = request.GET.get('fecha_hasta')
         
-        # Consulta para agrupar por tipo de trámite
-        base_qs = Visitante.objects.filter(fecha_hora_ingreso__gte=fecha_inicio)
+        base_qs = Visitante.objects.all()
+        
+        if fecha_desde and fecha_hasta:
+            try:
+                desde = datetime.strptime(fecha_desde, '%Y-%m-%d')
+                hasta = datetime.strptime(fecha_hasta, '%Y-%m-%d') + timedelta(days=1)
+                base_qs = base_qs.filter(fecha_hora_ingreso__range=(desde, hasta))
+                periodo = f"del {fecha_desde} al {fecha_hasta}"
+            except ValueError:
+                periodo = 'personalizado'
+        else:
+            periodo_map = {
+                'hoy': 'Hoy',
+                'semana': 'Esta Semana',
+                'mes': 'Este Mes',
+                'trimestre': 'Este Trimestre',
+                'anio': 'Este Año'
+            }
+            periodo = periodo_map.get(periodo, periodo.capitalize())
+
+        if periodo == 'Hoy' or periodo == 'Esta Semana' or periodo == 'Este Mes' or periodo == 'Este Trimestre' or periodo == 'Este Año':
+            fecha_actual = timezone.now()
+            if periodo == 'hoy':
+                fecha_inicio = fecha_actual.replace(hour=0, minute=0, second=0, microsecond=0)
+            elif periodo == 'semana':
+                fecha_inicio = fecha_actual - timedelta(days=7)
+            elif periodo == 'mes':
+                fecha_inicio = fecha_actual.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            elif periodo == 'trimestre':
+                fecha_inicio = fecha_actual - timedelta(days=90)
+            elif periodo == 'anio':
+                fecha_inicio = fecha_actual.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            else:
+                fecha_inicio = fecha_actual.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            base_qs = base_qs.filter(fecha_hora_ingreso__gte=fecha_inicio)
+
         if municipio_param:
             base_qs = base_qs.filter(municipio__icontains=municipio_param)
         if tipo_param:
@@ -256,6 +308,20 @@ class ReporteTramitesView(APIView):
             porcentaje_total = round((total_completados / total_tramites) * 100, 2)
         else:
             porcentaje_total = 0
+        # Registrar en auditoría
+        try:
+            from .middleware import get_current_user, get_current_ip
+            from .models import AuditLog
+            AuditLog.objects.create(
+                usuario=get_current_user() or (request.user.username if request.user.is_authenticated else 'Anónimo'),
+                accion='REPORT',
+                modulo='Reporte Trámites',
+                descripcion=f"Consultó distribución de trámites (período: {periodo})",
+                ip=get_current_ip()
+            )
+        except Exception as e_audit:
+            logger.warning("Error registrando auditoría de reporte trámites: %s", e_audit)
+
         return Response({
             'success': True,
             'periodo': periodo,
@@ -413,6 +479,7 @@ class ReporteDiarioView(APIView):
 
 class ReporteEstadisticasView(APIView):
     def get(self, request):
+        periodo = request.GET.get('periodo', 'mes')
         fecha_actual = timezone.now()
 
         # aceptar filtros opcionales para estadísticas
@@ -421,7 +488,28 @@ class ReporteEstadisticasView(APIView):
         referir_param = request.GET.get('referir_a')
 
         # Base queryset con filtros aplicados
+        fecha_desde = request.GET.get('fecha_desde')
+        fecha_hasta = request.GET.get('fecha_hasta')
         base_qs = Visitante.objects.all()
+
+        if fecha_desde and fecha_hasta:
+            try:
+                desde = datetime.strptime(fecha_desde, '%Y-%m-%d')
+                hasta = datetime.strptime(fecha_hasta, '%Y-%m-%d') + timedelta(days=1)
+                base_qs = base_qs.filter(fecha_hora_ingreso__range=(desde, hasta))
+                periodo = f"del {fecha_desde} al {fecha_hasta}"
+            except ValueError:
+                periodo = 'personalizado'
+        else:
+            periodo_map = {
+                'hoy': 'Hoy',
+                'semana': 'Esta Semana',
+                'mes': 'Este Mes',
+                'trimestre': 'Este Trimestre',
+                'anio': 'Este Año'
+            }
+            periodo = periodo_map.get(periodo, periodo.capitalize())
+
         if municipio_param:
             base_qs = base_qs.filter(municipio__icontains=municipio_param)
         if tipo_param:
@@ -473,6 +561,20 @@ class ReporteEstadisticasView(APIView):
         tipos_tramite_count = base_qs.values('tipo_visita').distinct().count()
         activos = base_qs.filter(atencion_completada=False).count()
 
+        # Registrar en auditoría
+        try:
+            from .middleware import get_current_user, get_current_ip
+            from .models import AuditLog
+            AuditLog.objects.create(
+                usuario=get_current_user() or (request.user.username if request.user.is_authenticated else 'Anónimo'),
+                accion='REPORT',
+                modulo='Reporte Estadísticas',
+                descripcion=f"Consultó estadísticas generales (período: {periodo})",
+                ip=get_current_ip()
+            )
+        except Exception as e_audit:
+            logger.warning("Error registrando auditoría de reporte estadísticas: %s", e_audit)
+
         return Response({
             'success': True,
             'total_visitas': total_visitas,
@@ -488,13 +590,26 @@ class ReporteEstadisticasView(APIView):
             'dias_transcurridos': dias_transcurridos,
             'primera_visita_fecha': primera_fecha.strftime('%d/%m/%Y'),
             'hoy': hoy.strftime('%d/%m/%Y'),
-            '_formula_promedio': f"{total_visitas} visitas / {dias_transcurridos} días = {round(promedio_diario, 2)}",
-            '_muestra_tramites': base_qs.values('tipo_visita').annotate(count=Count('id')).order_by('-count')[:5]
+            'periodo': periodo
         })
 
 class ExportarReportePDFView(APIView):
     def get(self, request):
         periodo = request.GET.get('periodo', 'mes')
+        fecha_desde = request.GET.get('fecha_desde')
+        fecha_hasta = request.GET.get('fecha_hasta')
+
+        if fecha_desde and fecha_hasta:
+            periodo = f"del {fecha_desde} al {fecha_hasta}"
+        else:
+            periodo_map = {
+                'hoy': 'Hoy',
+                'semana': 'Esta Semana',
+                'mes': 'Este Mes',
+                'trimestre': 'Este Trimestre',
+                'anio': 'Este Año'
+            }
+            periodo = periodo_map.get(periodo, periodo.capitalize())
 
         # Preparar respuesta
         response = HttpResponse(content_type='application/pdf')
@@ -641,136 +756,27 @@ class ExportarReportePDFView(APIView):
             pdf = buffer.getvalue()
             buffer.close()
             response.write(pdf)
-            return response
         except Exception as e:
             # Fallback: return simple text response if generation fails
             logger.exception('Error generando PDF: %s', e)
-            buffer.close()
+            if not buffer.closed:
+                buffer.close()
             return HttpResponse(f"Error generando PDF: {e}", status=500)
 
-class ExportarReporteExcelView(APIView):
-    def get(self, request):
-        periodo = request.GET.get('periodo', 'mes')
-        
-        # Obtener datos
-        tramites_view = ReporteTramitesView()
-        tramites_response = tramites_view.get(request)
-        tramites_data = tramites_response.data if tramites_response.status_code == 200 else {'datos': []}
-        
-        mensual_view = ReporteVisitasMensualesView()
-        mensual_response = mensual_view.get(request)
-        mensual_data = mensual_response.data if mensual_response.status_code == 200 else {'datos': []}
-        
-        stats_view = ReporteEstadisticasView()
-        stats_response = stats_view.get(request)
-        stats_data = stats_response.data if stats_response.status_code == 200 else {}
-        
-        # Crear DataFrames de pandas
-        df_tramites = pd.DataFrame(tramites_data.get('datos', []))
-        df_mensual = pd.DataFrame(mensual_data.get('datos', []))
-        
-        # Crear archivo Excel en memoria
-        output = BytesIO()
-        
+        # Registrar en auditoría
         try:
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                # Hoja de resumen
-                df_resumen = pd.DataFrame([{
-                    'Total Visitas': stats_data.get('total_visitas', 0),
-                    'Promedio Diario': stats_data.get('promedio_diario', 0),
-                    'Trámite más Común': stats_data.get('tramite_mas_comun', ''),
-                    'Porcentaje Completados': f"{stats_data.get('porcentaje_completados', 0)}%",
-                    'Municipio más Visitado': stats_data.get('municipio_mas_visitado', ''),
-                    # 'Hora Pico' removed per request
-                    'Período Reporte': periodo
-                }])
-                df_resumen.to_excel(writer, sheet_name='Resumen', index=False)
-                
-                # Hoja de trámites
-                if not df_tramites.empty:
-                    df_tramites.to_excel(writer, sheet_name='Trámites', index=False)
-                
-                # Hoja mensual
-                if not df_mensual.empty:
-                    df_mensual.to_excel(writer, sheet_name='Visitas Mensuales', index=False)
-                
-                # Hoja de metadata
-                df_metadata = pd.DataFrame([{
-                    'Período': periodo,
-                    'Fecha Generación': datetime.now().strftime('%d/%m/%Y %H:%M'),
-                    'Generado por': (request.user.get_full_name() or request.user.username) if hasattr(request, 'user') and request.user.is_authenticated else (request.headers.get('X-Usuario') or request.META.get('HTTP_X_USUARIO') or ''),
-                    'Total Registros': len(df_tramites) + len(df_mensual)
-                }])
-                df_metadata.to_excel(writer, sheet_name='Metadata', index=False)
-                # Hoja de firmas (en Excel para impresión)
-                df_firmas = pd.DataFrame({
-                    'Coordinadora': [''],
-                    'Directora Administrativa Regional': ['']
-                })
-                df_firmas.to_excel(writer, sheet_name='Firmas', index=False)
+            from .middleware import get_current_user, get_current_ip
+            from .models import AuditLog
+            AuditLog.objects.create(
+                usuario=get_current_user() or (request.user.username if request.user.is_authenticated else 'Anónimo'),
+                accion='REPORT',
+                modulo='Reporte PDF',
+                descripcion=f"Generó reporte PDF para el período: {periodo}",
+                ip=get_current_ip()
+            )
+        except Exception as e_audit:
+            logger.warning("Error registrando auditoría de reporte PDF: %s", e_audit)
 
-                # Mejoras de formato si openpyxl está disponible
-                try:
-                    if openpyxl is not None and get_column_letter is not None:
-                        wb = writer.book
-                        # Formato resumen
-                        ws_res = writer.sheets.get('Resumen') or wb['Resumen']
-                        # Ajustar anchos de columna
-                        for i, col in enumerate(df_resumen.columns, 1):
-                            ws_res.column_dimensions[get_column_letter(i)].width = max(15, len(col) + 6)
-                        # Encabezados en negrita
-                        if Font is not None:
-                            for cell in ws_res[1]:
-                                cell.font = Font(bold=True)
-
-                        # Formato trámites
-                        if not df_tramites.empty:
-                            ws_tr = writer.sheets.get('Trámites') or wb['Trámites']
-                            for i, col in enumerate(df_tramites.columns, 1):
-                                ws_tr.column_dimensions[get_column_letter(i)].width = max(12, len(str(col)) + 6)
-                            for cell in ws_tr[1]:
-                                cell.font = Font(bold=True)
-
-                        # Formato mensual
-                        if not df_mensual.empty:
-                            ws_m = writer.sheets.get('Visitas Mensuales') or wb['Visitas Mensuales']
-                            for i, col in enumerate(df_mensual.columns, 1):
-                                ws_m.column_dimensions[get_column_letter(i)].width = max(12, len(str(col)) + 6)
-                            for cell in ws_m[1]:
-                                cell.font = Font(bold=True)
-
-                        # Hoja firmas: ajustar ancho y centrar texto
-                        ws_f = writer.sheets.get('Firmas') or wb['Firmas']
-                        ws_f.column_dimensions[get_column_letter(1)].width = 40
-                        ws_f.column_dimensions[get_column_letter(2)].width = 40
-                        for cell in ws_f[1]:
-                            cell.font = Font(bold=False)
-                        # Poner líneas de firma como texto grande
-                        ws_f.cell(row=1, column=1).value = '_______________________________'
-                        ws_f.cell(row=1, column=2).value = '_______________________________'
-                        ws_f.cell(row=2, column=1).value = 'Coordinadora de Equipo de Justicia Social'
-                        ws_f.cell(row=2, column=2).value = 'Directora Administrativa Regional'
-                except Exception as fe:
-                    # Si falla el formateo con openpyxl, seguir sin formato
-                    logger.warning('No se pudo aplicar formato Excel (openpyxl): %s', fe)
-            
-            output.seek(0)
-            content_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            filename = f"reporte_{periodo}_{datetime.now().strftime('%Y%m%d')}.xlsx"
-            
-        except Exception as e:
-            # Fallback simple si hay error con pandas
-            output = BytesIO()
-            output.write(b"Reporte generado el " + datetime.now().strftime('%d/%m/%Y %H:%M').encode())
-            output.write(b"\nPeriodo: " + periodo.encode())
-            output.seek(0)
-            content_type = 'text/plain'
-            filename = f"reporte_{periodo}_{datetime.now().strftime('%Y%m%d')}.txt"
-        
-        # Preparar respuesta
-        response = HttpResponse(output.getvalue(), content_type=content_type)
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        
         return response
     
     # ========== VISTA PARA REPORTE DE REFERIDOS ==========
@@ -778,21 +784,44 @@ class ExportarReporteExcelView(APIView):
 class ReporteReferidosView(APIView):
     def get(self, request):
         periodo = request.GET.get('periodo', 'mes')
+        # Calcular fecha de inicio según el período o rango personalizado
+        fecha_desde = request.GET.get('fecha_desde')
+        fecha_hasta = request.GET.get('fecha_hasta')
         
-        # Calcular fecha de inicio según el período
-        fecha_actual = timezone.now()
-        if periodo == 'hoy':
-            fecha_inicio = fecha_actual.replace(hour=0, minute=0, second=0, microsecond=0)
-        elif periodo == 'semana':
-            fecha_inicio = fecha_actual - timedelta(days=7)
-        elif periodo == 'mes':
-            fecha_inicio = fecha_actual.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        elif periodo == 'trimestre':
-            fecha_inicio = fecha_actual - timedelta(days=90)
-        elif periodo == 'anio':
-            fecha_inicio = fecha_actual.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        base_qs = Visitante.objects.all()
+        
+        if fecha_desde and fecha_hasta:
+            try:
+                desde = datetime.strptime(fecha_desde, '%Y-%m-%d')
+                hasta = datetime.strptime(fecha_hasta, '%Y-%m-%d') + timedelta(days=1)
+                base_qs = base_qs.filter(fecha_hora_ingreso__range=(desde, hasta))
+                periodo = f"del {fecha_desde} al {fecha_hasta}"
+            except ValueError:
+                periodo = 'personalizado'
         else:
-            fecha_inicio = fecha_actual.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            periodo_map = {
+                'hoy': 'Hoy',
+                'semana': 'Esta Semana',
+                'mes': 'Este Mes',
+                'trimestre': 'Este Trimestre',
+                'anio': 'Este Año'
+            }
+            periodo = periodo_map.get(periodo, periodo.capitalize())
+
+            fecha_actual = timezone.now()
+            if periodo == 'Hoy':
+                fecha_inicio = fecha_actual.replace(hour=0, minute=0, second=0, microsecond=0)
+            elif periodo == 'semana':
+                fecha_inicio = fecha_actual - timedelta(days=7)
+            elif periodo == 'mes':
+                fecha_inicio = fecha_actual.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            elif periodo == 'trimestre':
+                fecha_inicio = fecha_actual - timedelta(days=90)
+            elif periodo == 'anio':
+                fecha_inicio = fecha_actual.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            else:
+                fecha_inicio = fecha_actual.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            base_qs = base_qs.filter(fecha_hora_ingreso__gte=fecha_inicio)
         
         # filtros opcionales
         municipio_param = request.GET.get('municipio')
@@ -800,24 +829,17 @@ class ReporteReferidosView(APIView):
         referir_param = request.GET.get('referir_a')
 
         # 1. Obtener total de visitantes en el período (aplicar filtros si existen)
-        base_total = Visitante.objects.filter(fecha_hora_ingreso__gte=fecha_inicio)
         if municipio_param:
-            base_total = base_total.filter(municipio__icontains=municipio_param)
+            base_qs = base_qs.filter(municipio__icontains=municipio_param)
         if tipo_param:
-            base_total = base_total.filter(tipo_visita=tipo_param)
+            base_qs = base_qs.filter(tipo_visita=tipo_param)
         if referir_param:
-            base_total = base_total.filter(referir_a=referir_param)
+            base_qs = base_qs.filter(referir_a=referir_param)
 
-        total_visitantes = base_total.count()
+        total_visitantes = base_qs.count()
 
         # 2. Obtener visitantes referidos (excluyendo 'NO_REFERIDO')
-        visitantes_referidos = Visitante.objects.filter(fecha_hora_ingreso__gte=fecha_inicio).exclude(referir_a='NO_REFERIDO')
-        if municipio_param:
-            visitantes_referidos = visitantes_referidos.filter(municipio__icontains=municipio_param)
-        if tipo_param:
-            visitantes_referidos = visitantes_referidos.filter(tipo_visita=tipo_param)
-        if referir_param:
-            visitantes_referidos = visitantes_referidos.filter(referir_a=referir_param)
+        visitantes_referidos = base_qs.exclude(referir_a='NO_REFERIDO')
         
         total_referidos = visitantes_referidos.count()
         
@@ -882,6 +904,20 @@ class ReporteReferidosView(APIView):
             'generado_en': timezone.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
+        # Registrar en auditoría
+        try:
+            from .middleware import get_current_user, get_current_ip
+            from .models import AuditLog
+            AuditLog.objects.create(
+                usuario=get_current_user() or (request.user.username if request.user.is_authenticated else 'Anónimo'),
+                accion='REPORT',
+                modulo='Reporte Referidos',
+                descripcion=f"Consultó reporte de referidos (desde: {fecha_desde}, hasta: {fecha_hasta})",
+                ip=get_current_ip()
+            )
+        except Exception as e_audit:
+            logger.warning("Error registrando auditoría de reporte referidos: %s", e_audit)
+
         return Response({
             'success': True,
             'periodo': periodo,
@@ -1004,9 +1040,25 @@ class LoginView(APIView):
             return Response({'detail': 'Credenciales inválidas'}, status=status.HTTP_400_BAD_REQUEST)
 
         token, created = Token.objects.get_or_create(user=user)
+
+        # Registrar auditoría de LOGIN
+        try:
+            from .models import AuditLog
+            from .middleware import get_current_ip
+            AuditLog.objects.create(
+                usuario=user.get_full_name() or user.username,
+                accion='LOGIN',
+                modulo='Autenticación',
+                descripcion=f'Inició sesión: {user.get_full_name() or user.username}',
+                ip=get_current_ip(),
+            )
+        except Exception as e:
+            logger.exception('Error registrando auditoría de LOGIN: %s', e)
+
         return Response({
             'token': token.key,
-            'username': user.get_full_name() or user.username,
+            'username': user.username,
+            'displayName': user.get_full_name() or user.username,
             'id': user.id
         })
 
@@ -1016,6 +1068,20 @@ class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        # Registrar auditoría de LOGOUT antes de eliminar el token
+        try:
+            from .models import AuditLog
+            from .middleware import get_current_ip
+            AuditLog.objects.create(
+                usuario=request.user.get_full_name() or request.user.username,
+                accion='LOGOUT',
+                modulo='Autenticación',
+                descripcion=f'Cerró sesión: {request.user.get_full_name() or request.user.username}',
+                ip=get_current_ip(),
+            )
+        except Exception as e:
+            logger.exception('Error registrando auditoría de LOGOUT: %s', e)
+
         # eliminar token para forzar logout
         try:
             Token.objects.filter(user=request.user).delete()
@@ -1031,6 +1097,73 @@ class CurrentUserView(APIView):
     def get(self, request):
         user = request.user
         return Response({'username': user.get_full_name() or user.username, 'id': user.id})
+
+
+class RegisterView(APIView):
+    """Registro público de usuarios (crea usuario y devuelve token)."""
+    authentication_classes = []
+    permission_classes = []
+
+
+# ========== VISTA DE AUDITORÍA ==========
+
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Endpoint de solo lectura para consultar los registros de auditoría.
+    Filtros disponibles:
+      - usuario      (coincidencia parcial)
+      - accion       (valores: CREATE, UPDATE, DELETE, LOGIN, LOGOUT)
+      - modulo       (coincidencia parcial)
+      - fecha_desde  (YYYY-MM-DD)
+      - fecha_hasta  (YYYY-MM-DD)
+    """
+    from .models import AuditLog as _AuditLog
+    queryset = _AuditLog.objects.all()
+    serializer_class = AuditLogSerializer
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # Restricción: solo el usuario 'admin' o un superusuario puede ver logs
+        user = self.request.user
+        if not (user.is_superuser or user.username == 'admin'):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Sólo el administrador puede ver los logs de auditoría.")
+
+        from .models import AuditLog
+        qs = AuditLog.objects.all()
+
+        usuario = self.request.query_params.get('usuario')
+        if usuario:
+            qs = qs.filter(usuario__icontains=usuario)
+
+        accion = self.request.query_params.get('accion')
+        if accion:
+            qs = qs.filter(accion=accion.upper())
+
+        modulo = self.request.query_params.get('modulo')
+        if modulo:
+            qs = qs.filter(modulo__icontains=modulo)
+
+        fecha_desde = self.request.query_params.get('fecha_desde')
+        if fecha_desde:
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(fecha_desde, '%Y-%m-%d')
+                qs = qs.filter(fecha__date__gte=dt.date())
+            except ValueError:
+                pass
+
+        fecha_hasta = self.request.query_params.get('fecha_hasta')
+        if fecha_hasta:
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(fecha_hasta, '%Y-%m-%d')
+                qs = qs.filter(fecha__date__lte=dt.date())
+            except ValueError:
+                pass
+
+        return qs
 
 
 class RegisterView(APIView):
@@ -1061,7 +1194,12 @@ class RegisterView(APIView):
                 logger.exception('Error guardando full_name en RegisterView: %s', e)
 
         token, _ = Token.objects.get_or_create(user=user)
-        return Response({'token': token.key, 'username': user.get_full_name() or user.username, 'id': user.id})
+        return Response({
+            'token': token.key,
+            'username': user.username,
+            'displayName': user.get_full_name() or user.username, 
+            'id': user.id
+        })
 
 
 # ========== ENDPOINTS DE ACTUALIZACIÓN / VERSION ==========
